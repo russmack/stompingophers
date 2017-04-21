@@ -9,19 +9,57 @@ import (
 	"strconv"
 )
 
-const SUPPORTEDVERSIONS string = "1.0,1.1,1.2"
+const (
+	SUPPORTEDVERSIONS string = "1.0,1.1,1.2"
+
+	ACKMODE_AUTO             string = "auto"
+	ACKMODE_CLIENT           string = "client"
+	ACKMODE_CLIENTINDIVIDUAL string = "client-individual"
+)
 
 func init() {
-	logEnabled := true
+	logEnabled := false
 	if !logEnabled {
 		log.SetFlags(0)
 		log.SetOutput(ioutil.Discard)
 	}
 }
 
+// AckModer is a Golang enum abomination.
+type AckModer interface {
+	getAckMode() string
+}
+
+type AckModeAuto struct{}
+type AckModeClient struct{}
+type AckModeClientIndividual struct{}
+
+func (a *AckModeAuto) getAckMode() string {
+	return ACKMODE_AUTO
+}
+
+func (a *AckModeClient) getAckMode() string {
+	return ACKMODE_CLIENT
+}
+
+func (a *AckModeClientIndividual) getAckMode() string {
+	return ACKMODE_CLIENTINDIVIDUAL
+}
+
+// End of AckMode enum abomination.
+
 type Client struct {
-	connection net.Conn
-	Response   string
+	connection    net.Conn
+	Response      string
+	Subscriptions []Subscription
+}
+
+type Subscription struct {
+	Id string
+	// TODO: consider creating a channel type
+	ChannelName string
+	ChannelType string // queue or topic
+	AckMode     string
 }
 
 // Only the Send, Message, and Error frames may have a body, the others must not.
@@ -69,13 +107,12 @@ func (f *frame) addHeaderId(s string) {
 	f.addHeader("id", s)
 }
 
-func (f *frame) addHeaderAck(s string) {
-	if s != "auto" &&
-		s != "client" &&
-		s != "client-individual" {
-		panic("invalid ack value")
-	}
-	f.addHeader("ack", s)
+func (f *frame) addHeaderAck(am AckModer) {
+	f.addHeader("ack", am.getAckMode())
+}
+
+func (f *frame) addHeaderTransaction(s string) {
+	f.addHeader("transaction", s)
 }
 
 func newCmdConnect(host string) frame {
@@ -91,6 +128,18 @@ func newCmdConnect(host string) frame {
 	return f
 }
 
+func newCmdDisconnect(rcpt string) frame {
+	f := frame{
+		command: "DISCONNECT",
+		headers: headers{},
+		body:    "",
+	}
+
+	f.addHeaderReceipt(rcpt)
+
+	return f
+}
+
 func newCmdSend(queueName, body, rcpt string) frame {
 	f := frame{
 		command: "SEND",
@@ -101,22 +150,104 @@ func newCmdSend(queueName, body, rcpt string) frame {
 	f.addHeaderDestination(queueName)
 	f.addHeaderContentType("text/plain")
 	f.addHeaderContentLength()
+	// TODO: check spec if optional
 	f.addHeaderReceipt(rcpt)
 
 	return f
 }
 
-func newCmdSubscribe(queueName, id, ack string) frame {
+func newCmdAck(msgId, txnId string) frame {
+	f := frame{
+		command: "ACK",
+		headers: headers{},
+		body:    "",
+	}
+
+	f.addHeaderId(msgId)
+
+	if txnId != "" {
+		f.addHeaderTransaction(txnId)
+	}
+
+	return f
+}
+
+func newCmdNack(msgId, txnId string) frame {
+	f := frame{
+		command: "NACK",
+		headers: headers{},
+		body:    "",
+	}
+
+	f.addHeaderId(msgId)
+
+	if txnId != "" {
+		f.addHeaderTransaction(txnId)
+	}
+
+	return f
+}
+
+func newCmdSubscribe(queueName, subId string, am AckModer) frame {
 	f := frame{
 		command: "SUBSCRIBE",
 		headers: headers{},
 		body:    "",
 	}
 
-	f.addHeaderId(id)
+	f.addHeaderId(subId)
 	f.addHeaderDestination(queueName)
-	f.addHeaderAck(ack)
-	f.addHeaderReceipt("test-rcpt")
+	f.addHeaderAck(am)
+	// TODO: decide what to do with the receipt.
+	f.addHeaderReceipt("optional-subscription-rcpt")
+
+	return f
+}
+
+func newCmdUnsubscribe(subId string) frame {
+	f := frame{
+		command: "UNSUBSCRIBE",
+		headers: headers{},
+		body:    "",
+	}
+
+	f.addHeaderId(subId)
+
+	return f
+}
+
+func newCmdBegin(txnId string) frame {
+	f := frame{
+		command: "BEGIN",
+		headers: headers{},
+		body:    "",
+	}
+
+	f.addHeaderTransaction(txnId)
+
+	return f
+}
+
+func newCmdAbort(txnId string) frame {
+	f := frame{
+		command: "ABORT",
+		headers: headers{},
+		body:    "",
+	}
+
+	f.addHeaderTransaction(txnId)
+
+	return f
+}
+
+func newCmdCommit(txnId string) frame {
+	f := frame{
+		command: "COMMIT",
+		headers: headers{},
+		body:    "",
+	}
+
+	f.addHeaderTransaction(txnId)
 
 	return f
 }
@@ -136,10 +267,6 @@ func formatRequest(f frame) string {
 	log.Printf("Request [ascii]:\n%s\n", string(req))
 
 	return req
-}
-
-func (c *Client) Disconnect() error {
-	return c.connection.Close()
 }
 
 func sendRequest(conn net.Conn, fr frame) (string, error) {
@@ -177,47 +304,153 @@ func Connect(host string, port int) (Client, error) {
 	return client, nil
 }
 
+func (c *Client) Disconnect() error {
+	// Graceful shutdown: send disconnect frame, check rcpt received, then close socket.
+	// Do not send any more frames after the DISCONNECT frame has been sent.
+
+	// TODO: sort out the receipt
+	resp, err := sendRequest(c.connection, newCmdDisconnect("rcpt-disconnect-123"))
+	if err != nil {
+		log.Println("failed sending disconnect:", err)
+		return err
+	}
+
+	c.Response = resp
+
+	// TODO: Parse returned RECEIPT frame for receipt-id
+
+	return c.connection.Close()
+}
+
 func (c *Client) Send(queueName, msg string) error {
 	// Server will not send a response unless either:
 	// a - receipt header is set.
 	// b - the server sends an ERROR response and disconnects.
 
+	// TODO: sort out the receipt
 	resp, err := sendRequest(c.connection, newCmdSend(queueName, msg, "rcpt-123"))
 	if err != nil {
+		// If the server returned an error here then it will also have disconnected.
 		log.Println("failed enqueue:", err)
 		return err
 	}
+	// No error, implies a successful send.
 
 	c.Response = resp
 
 	return nil
 }
 
-func (c *Client) Subscribe(queueName, ackMode string) error {
-	resp, err := sendRequest(c.connection, newCmdSubscribe(queueName, "subid-0", ackMode))
+func (c *Client) Ack(msgId, transactionId string) error {
+	resp, err := sendRequest(c.connection, newCmdAck(msgId, transactionId))
+	if err != nil {
+		log.Println("failed sending ack:", err)
+		return err
+	}
+
+	// TODO: confirm not needed before removing this line
+	c.Response = resp
+
+	return nil
+}
+
+func (c *Client) Nack(msgId, transactionId string) error {
+	resp, err := sendRequest(c.connection, newCmdNack(msgId, transactionId))
+	if err != nil {
+		log.Println("failed sending nack:", err)
+		return err
+	}
+
+	// TODO: confirm not needed before removing this line
+	c.Response = resp
+
+	return nil
+}
+
+func (c *Client) Subscribe(queueName string, am AckModer) error {
+	// Simple approach of setting id to list index.
+	subId := strconv.Itoa(len(c.Subscriptions))
+	resp, err := sendRequest(c.connection, newCmdSubscribe(queueName, subId, am))
 	if err != nil {
 		log.Println("failed subscribe:", err)
 		return err
 	}
 
+	c.Subscriptions = append(c.Subscriptions, Subscription{
+		Id:          subId,
+		ChannelName: queueName,
+		ChannelType: "not implemented",
+		AckMode:     am.getAckMode(),
+	})
+
 	c.Response = resp
 
 	return nil
 }
 
-func (c *Client) Receive(fn func(string)) error {
+func (c *Client) Unsubscribe(subId string) error {
+	resp, err := sendRequest(c.connection, newCmdUnsubscribe(subId))
+	if err != nil {
+		log.Println("failed unsubscribe:", err)
+		return err
+	}
+
+	c.Response = resp
+
+	return nil
+}
+
+func (c *Client) Receive(fn func(string, chan int), ch chan int) error {
 	log.Println("Started receiving...")
 
 	reader := bufio.NewReader(c.connection)
 
-	for i := 0; i < 10; i++ {
+	// TODO: remove this dev limit.
+	for i := 0; i < 45000; i++ {
+		//for {
 		resp, err := reader.ReadString('\000')
 		if err != nil {
 			return err
 		}
 
-		go fn(resp)
+		go fn(resp, ch)
 	}
+
+	return nil
+}
+
+func (c *Client) Begin(transactionId string) error {
+	resp, err := sendRequest(c.connection, newCmdBegin(transactionId))
+	if err != nil {
+		log.Println("failed begin:", err)
+		return err
+	}
+
+	c.Response = resp
+
+	return nil
+}
+
+func (c *Client) Abort(transactionId string) error {
+	resp, err := sendRequest(c.connection, newCmdAbort(transactionId))
+	if err != nil {
+		log.Println("failed abort:", err)
+		return err
+	}
+
+	c.Response = resp
+
+	return nil
+}
+
+func (c *Client) Commit(transactionId string) error {
+	resp, err := sendRequest(c.connection, newCmdCommit(transactionId))
+	if err != nil {
+		log.Println("failed commit:", err)
+		return err
+	}
+
+	c.Response = resp
 
 	return nil
 }

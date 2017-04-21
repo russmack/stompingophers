@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/russmack/stompingophers"
+	stomper "github.com/russmack/stompingophers"
 )
 
 func main() {
@@ -16,7 +16,7 @@ func consumer() {
 	queueIp := "127.0.0.1"
 	queuePort := 61613
 
-	client, err := stompingophers.Connect(queueIp, queuePort)
+	client, err := stomper.Connect(queueIp, queuePort)
 	if err != nil {
 		panic("failed connecting: " + err.Error())
 	}
@@ -25,23 +25,29 @@ func consumer() {
 
 	fmt.Println("Subscribing to queue...\n")
 
-	err = client.Subscribe("/queue/nooq", "auto")
+	err = client.Subscribe("/queue/nooq", &stomper.AckModeAuto{})
 	if err != nil {
 		panic("failed sending: " + err.Error())
 	}
 
 	fmt.Println("\nResponse:", client.Response)
 
-	client.Receive(printMessage)
+	done := make(chan int)
 
-	<-make(chan bool)
+	go client.Receive(printMessage, done)
+
+	// For dev purposes.
+	for i := 0; i < 45000; i++ {
+		<-done
+	}
 
 	client.Disconnect()
 }
 
-func printMessage(s string) {
-	fmt.Println("\n---------------------------")
-	fmt.Println("Message arrived:")
-	fmt.Println(s)
-	fmt.Println("---------------------------")
+func printMessage(s string, ch chan int) {
+	ch <- 1
+	//fmt.Println("\n---------------------------")
+	//fmt.Println("Message arrived:")
+	//fmt.Println(s)
+	//fmt.Println("---------------------------")
 }
