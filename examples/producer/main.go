@@ -26,7 +26,7 @@ func producer() {
 
 	fmt.Println("Sending messages...")
 
-	for j := range gen2() {
+	for j := range gen1() {
 		err = client.Send("/queue/nooq", j)
 		if err != nil {
 			panic("failed sending: " + err.Error())
@@ -40,9 +40,11 @@ func gen1() chan string {
 	c := make(chan string)
 
 	go func() {
-		for i := 0; i < 45000; i++ {
+		//for i := 0; i < 45000; i++ {
+		for i := 0; i < 4; i++ {
 			c <- "Well, hello, number " + strconv.Itoa(i) + "!"
 		}
+		close(c)
 	}()
 
 	return c

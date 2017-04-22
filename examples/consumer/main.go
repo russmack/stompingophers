@@ -25,7 +25,7 @@ func consumer() {
 
 	fmt.Println("Subscribing to queue...\n")
 
-	err = client.Subscribe("/queue/nooq", &stomper.AckModeAuto{})
+	err = client.Subscribe("/queue/nooq", &stomper.AckModeClientIndividual{})
 	if err != nil {
 		panic("failed sending: " + err.Error())
 	}
@@ -37,7 +37,8 @@ func consumer() {
 	go client.Receive(printMessage, done)
 
 	// For dev purposes.
-	for i := 0; i < 45000; i++ {
+	//for i := 0; i < 45000; i++ {
+	for i := 0; i < 4; i++ {
 		<-done
 	}
 
@@ -45,7 +46,15 @@ func consumer() {
 }
 
 func printMessage(s string, ch chan int) {
+	m, err := stomper.ParseResponse(s)
+	if err != nil {
+		fmt.Println("failed parsing message:", err)
+	} else {
+		fmt.Printf("Parsed message: \n%+v\n", m)
+	}
+
 	ch <- 1
+
 	//fmt.Println("\n---------------------------")
 	//fmt.Println("Message arrived:")
 	//fmt.Println(s)
