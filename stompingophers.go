@@ -2,6 +2,7 @@ package stompingophers
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -18,14 +19,14 @@ const (
 )
 
 func init() {
-	logEnabled := false
+	logEnabled := true
 	if !logEnabled {
 		log.SetFlags(0)
 		log.SetOutput(ioutil.Discard)
 	}
 }
 
-// AckModer is a Golang enum abomination.
+// AckModer is a Golang enum abomination.  TODO: learn to embed Rust.
 type AckModer interface {
 	getAckMode() string
 }
@@ -55,11 +56,14 @@ type Client struct {
 }
 
 type Subscription struct {
-	Id string
-	// TODO: consider creating a channel type
-	ChannelName string
-	ChannelType string // queue or topic
-	AckMode     string
+	Id      string
+	Channel Channel
+	AckMode string
+}
+
+type Channel struct {
+	Name string
+	Type string // queue or topic
 }
 
 // Only the Send, Message, and Error frames may have a body, the others must not.
@@ -80,11 +84,11 @@ func (f *frame) addHeader(k, v string) {
 }
 
 func (f *frame) addHeaderAcceptVersion(s string) {
-	f.headers.add("accept-version", s)
+	f.addHeader("accept-version", s)
 }
 
 func (f *frame) addHeaderHost(s string) {
-	f.headers.add("host", s)
+	f.addHeader("host", s)
 }
 
 func (f *frame) addHeaderContentLength() {
@@ -348,6 +352,8 @@ func (c *Client) Ack(msgId, transactionId string) error {
 		return err
 	}
 
+	log.Printf("***** DEBUG ACK:: \n%+v\n", resp)
+
 	// TODO: confirm not needed before removing this line
 	c.Response = resp
 
@@ -360,6 +366,8 @@ func (c *Client) Nack(msgId, transactionId string) error {
 		log.Println("failed sending nack:", err)
 		return err
 	}
+
+	log.Printf("***** DEBUG Nack:: \n%+v\n", resp)
 
 	// TODO: confirm not needed before removing this line
 	c.Response = resp
@@ -377,10 +385,12 @@ func (c *Client) Subscribe(queueName string, am AckModer) error {
 	}
 
 	c.Subscriptions = append(c.Subscriptions, Subscription{
-		Id:          subId,
-		ChannelName: queueName,
-		ChannelType: "not implemented",
-		AckMode:     am.getAckMode(),
+		Id: subId,
+		Channel: Channel{
+			Name: queueName,
+			Type: "not implemented",
+		},
+		AckMode: am.getAckMode(),
 	})
 
 	c.Response = resp
@@ -412,6 +422,8 @@ func (c *Client) Receive(fn func(string, chan int), ch chan int) error {
 		if err != nil {
 			return err
 		}
+
+		log.Printf("DEBUG RESP:\n%+v\n", resp)
 
 		go fn(resp, ch)
 	}
@@ -453,4 +465,62 @@ func (c *Client) Commit(transactionId string) error {
 	c.Response = resp
 
 	return nil
+}
+
+type Message struct {
+	Command string
+	Headers map[string]string
+	Body    string
+}
+
+func ParseResponse(s string) (Message, error) {
+	msg := Message{
+		Command: "",
+		Headers: make(map[string]string),
+	}
+	var cmd string
+	var headStart int
+	msgLen := len(s)
+	for i := 0; i < msgLen; i++ {
+		if s[i] == '\n' {
+			cmd = s[:i]
+			headStart = i + 1
+			break
+		}
+	}
+
+	if cmd == "" {
+		log.Printf("failed parsing message, no lines in: %s", s)
+		return msg, errors.New("failed parsing invalid message")
+	}
+
+	// Rest of msg, without command.
+	remMsg := s[headStart:]
+
+	kStart := 0
+	kDone := false
+	vStart := 0
+	var k string
+	var v string
+	for i, j := range remMsg {
+
+		if !kDone && j == ':' {
+			k = remMsg[kStart:i]
+			vStart = i
+			kDone = true
+		}
+
+		if kDone && j == '\n' {
+			v = remMsg[vStart:i]
+			msg.Headers[k] = v
+
+			kStart += 1
+			kDone = false
+		}
+
+	}
+
+	msg.Body = remMsg[kStart:]
+
+	return msg, nil
 }
