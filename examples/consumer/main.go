@@ -6,8 +6,21 @@ import (
 	stomper "github.com/russmack/stompingophers"
 )
 
+var printer chan string
+
 func main() {
 
+	printer = make(chan string)
+
+	go func() {
+		for {
+			msg := <-printer
+			fmt.Println("####################")
+			fmt.Println("Parsed response:")
+			fmt.Println(msg)
+			fmt.Println("####################")
+		}
+	}()
 	consumer()
 
 }
@@ -30,7 +43,12 @@ func consumer() {
 		panic("failed sending: " + err.Error())
 	}
 
-	fmt.Println("\nResponse:", client.Response)
+	fmt.Println("\nRaw subscribe response:\n", client.Response)
+	msg, err := stomper.ParseResponse(client.Response)
+	if err != nil {
+		fmt.Println("failed parsing subscribe response:", err)
+	}
+	fmt.Println("Parsed subscribe response:\n", msg)
 
 	done := make(chan int)
 
@@ -38,6 +56,7 @@ func consumer() {
 
 	// For dev purposes.
 	//for i := 0; i < 45000; i++ {
+	//for i := 0; i < 1; i++ {
 	for i := 0; i < 4; i++ {
 		<-done
 	}
@@ -48,9 +67,9 @@ func consumer() {
 func printMessage(s string, ch chan int) {
 	m, err := stomper.ParseResponse(s)
 	if err != nil {
-		fmt.Println("failed parsing message:", err)
+		printer <- "failed parsing message: " + err.Error()
 	} else {
-		fmt.Printf("Parsed message: \n%+v\n", m)
+		printer <- fmt.Sprintf("%+v\n", m)
 	}
 
 	ch <- 1
