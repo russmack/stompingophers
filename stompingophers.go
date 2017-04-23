@@ -19,7 +19,7 @@ const (
 )
 
 func init() {
-	logEnabled := true
+	logEnabled := false
 	if !logEnabled {
 		log.SetFlags(0)
 		log.SetOutput(ioutil.Discard)
@@ -416,6 +416,7 @@ func (c *Client) Receive(fn func(string, chan int), ch chan int) error {
 	reader := bufio.NewReader(c.connection)
 
 	// TODO: remove this dev limit.
+	//for i := 0; i < 1; i++ {
 	for i := 0; i < 45000; i++ {
 		//for {
 		resp, err := reader.ReadString('\000')
@@ -483,6 +484,12 @@ func ParseResponse(s string) (Message, error) {
 	msgLen := len(s)
 	for i := 0; i < msgLen; i++ {
 		if s[i] == '\n' {
+			// TODO: investigate this anomaly -
+			// some repsonses being with '\n'
+			if i == 0 {
+				// Ignore \n if it is the first response character.
+				continue
+			}
 			cmd = s[:i]
 			headStart = i + 1
 			break
@@ -494,6 +501,8 @@ func ParseResponse(s string) (Message, error) {
 		return msg, errors.New("failed parsing invalid message")
 	}
 
+	msg.Command = cmd
+
 	// Rest of msg, without command.
 	remMsg := s[headStart:]
 
@@ -503,10 +512,9 @@ func ParseResponse(s string) (Message, error) {
 	var k string
 	var v string
 	for i, j := range remMsg {
-
 		if !kDone && j == ':' {
 			k = remMsg[kStart:i]
-			vStart = i
+			vStart = i + 1
 			kDone = true
 		}
 
@@ -514,10 +522,9 @@ func ParseResponse(s string) (Message, error) {
 			v = remMsg[vStart:i]
 			msg.Headers[k] = v
 
-			kStart += 1
+			kStart = i + 1
 			kDone = false
 		}
-
 	}
 
 	msg.Body = remMsg[kStart:]
