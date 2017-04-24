@@ -41,7 +41,7 @@ func gen1() chan string {
 
 	go func() {
 		//for i := 0; i < 45000; i++ {
-		for i := 0; i < 4; i++ {
+		for i := 0; i < 1; i++ {
 			c <- "Well, hello, number " + strconv.Itoa(i) + "!"
 		}
 		close(c)

@@ -6,7 +6,10 @@ import (
 	stomper "github.com/russmack/stompingophers"
 )
 
-var printer chan string
+var (
+	printer chan string
+	client  stomper.Client
+)
 
 func main() {
 
@@ -29,7 +32,8 @@ func consumer() {
 	queueIp := "127.0.0.1"
 	queuePort := 61613
 
-	client, err := stomper.Connect(queueIp, queuePort)
+	var err error
+	client, err = stomper.Connect(queueIp, queuePort)
 	if err != nil {
 		panic("failed connecting: " + err.Error())
 	}
@@ -38,6 +42,7 @@ func consumer() {
 
 	fmt.Println("Subscribing to queue...\n")
 
+	//err = client.Subscribe("/queue/nooq", &stomper.AckModeAuto{})
 	err = client.Subscribe("/queue/nooq", &stomper.AckModeClientIndividual{})
 	if err != nil {
 		panic("failed sending: " + err.Error())
@@ -56,8 +61,8 @@ func consumer() {
 
 	// For dev purposes.
 	//for i := 0; i < 45000; i++ {
-	//for i := 0; i < 1; i++ {
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 1; i++ {
+		//for i := 0; i < 4; i++ {
 		<-done
 	}
 
@@ -69,13 +74,13 @@ func printMessage(s string, ch chan int) {
 	if err != nil {
 		printer <- "failed parsing message: " + err.Error()
 	} else {
-		printer <- fmt.Sprintf("%+v\n", m)
+		//printer <- fmt.Sprintf("%+v\n", m)
+		msgAckId := m.Headers["ack"]
+		err := client.Ack(msgAckId, "")
+		if err != nil {
+			fmt.Println("ack err:", err)
+		}
 	}
 
 	ch <- 1
-
-	//fmt.Println("\n---------------------------")
-	//fmt.Println("Message arrived:")
-	//fmt.Println(s)
-	//fmt.Println("---------------------------")
 }
