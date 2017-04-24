@@ -19,7 +19,7 @@ const (
 )
 
 func init() {
-	logEnabled := false
+	logEnabled := true
 	if !logEnabled {
 		log.SetFlags(0)
 		log.SetOutput(ioutil.Discard)
@@ -68,9 +68,10 @@ type Channel struct {
 
 // Only the Send, Message, and Error frames may have a body, the others must not.
 type frame struct {
-	command string
-	headers headers
-	body    string
+	command        string
+	headers        headers
+	body           string
+	expectResponse bool
 }
 
 type headers map[string]string
@@ -121,9 +122,10 @@ func (f *frame) addHeaderTransaction(s string) {
 
 func newCmdConnect(host string) frame {
 	f := frame{
-		command: "CONNECT",
-		headers: headers{},
-		body:    "",
+		command:        "CONNECT",
+		headers:        headers{},
+		body:           "",
+		expectResponse: true, // TODO: confirm
 	}
 
 	f.addHeaderAcceptVersion(SUPPORTEDVERSIONS)
@@ -134,9 +136,10 @@ func newCmdConnect(host string) frame {
 
 func newCmdDisconnect(rcpt string) frame {
 	f := frame{
-		command: "DISCONNECT",
-		headers: headers{},
-		body:    "",
+		command:        "DISCONNECT",
+		headers:        headers{},
+		body:           "",
+		expectResponse: true, // TODO: confirm
 	}
 
 	f.addHeaderReceipt(rcpt)
@@ -146,9 +149,10 @@ func newCmdDisconnect(rcpt string) frame {
 
 func newCmdSend(queueName, body, rcpt string) frame {
 	f := frame{
-		command: "SEND",
-		headers: headers{},
-		body:    body,
+		command:        "SEND",
+		headers:        headers{},
+		body:           body,
+		expectResponse: true, // TODO: confirm
 	}
 
 	f.addHeaderDestination(queueName)
@@ -162,9 +166,10 @@ func newCmdSend(queueName, body, rcpt string) frame {
 
 func newCmdAck(msgId, txnId string) frame {
 	f := frame{
-		command: "ACK",
-		headers: headers{},
-		body:    "",
+		command:        "ACK",
+		headers:        headers{},
+		body:           "",
+		expectResponse: false,
 	}
 
 	f.addHeaderId(msgId)
@@ -178,9 +183,10 @@ func newCmdAck(msgId, txnId string) frame {
 
 func newCmdNack(msgId, txnId string) frame {
 	f := frame{
-		command: "NACK",
-		headers: headers{},
-		body:    "",
+		command:        "NACK",
+		headers:        headers{},
+		body:           "",
+		expectResponse: false,
 	}
 
 	f.addHeaderId(msgId)
@@ -194,9 +200,10 @@ func newCmdNack(msgId, txnId string) frame {
 
 func newCmdSubscribe(queueName, subId string, am AckModer) frame {
 	f := frame{
-		command: "SUBSCRIBE",
-		headers: headers{},
-		body:    "",
+		command:        "SUBSCRIBE",
+		headers:        headers{},
+		body:           "",
+		expectResponse: true,
 	}
 
 	f.addHeaderId(subId)
@@ -210,9 +217,10 @@ func newCmdSubscribe(queueName, subId string, am AckModer) frame {
 
 func newCmdUnsubscribe(subId string) frame {
 	f := frame{
-		command: "UNSUBSCRIBE",
-		headers: headers{},
-		body:    "",
+		command:        "UNSUBSCRIBE",
+		headers:        headers{},
+		body:           "",
+		expectResponse: true, // TODO: confirm
 	}
 
 	f.addHeaderId(subId)
@@ -222,9 +230,10 @@ func newCmdUnsubscribe(subId string) frame {
 
 func newCmdBegin(txnId string) frame {
 	f := frame{
-		command: "BEGIN",
-		headers: headers{},
-		body:    "",
+		command:        "BEGIN",
+		headers:        headers{},
+		body:           "",
+		expectResponse: true, // TODO: confirm
 	}
 
 	f.addHeaderTransaction(txnId)
@@ -234,9 +243,10 @@ func newCmdBegin(txnId string) frame {
 
 func newCmdAbort(txnId string) frame {
 	f := frame{
-		command: "ABORT",
-		headers: headers{},
-		body:    "",
+		command:        "ABORT",
+		headers:        headers{},
+		body:           "",
+		expectResponse: true, // TODO: confirm
 	}
 
 	f.addHeaderTransaction(txnId)
@@ -246,9 +256,10 @@ func newCmdAbort(txnId string) frame {
 
 func newCmdCommit(txnId string) frame {
 	f := frame{
-		command: "COMMIT",
-		headers: headers{},
-		body:    "",
+		command:        "COMMIT",
+		headers:        headers{},
+		body:           "",
+		expectResponse: true, // TODO: confirm
 	}
 
 	f.addHeaderTransaction(txnId)
@@ -276,6 +287,10 @@ func formatRequest(f frame) string {
 func sendRequest(conn net.Conn, fr frame) (string, error) {
 	req := formatRequest(fr)
 	fmt.Fprintf(conn, req)
+
+	if !fr.expectResponse {
+		return "", nil
+	}
 
 	resp, err := bufio.NewReader(conn).ReadString('\000')
 	if err != nil {
@@ -346,31 +361,21 @@ func (c *Client) Send(queueName, msg string) error {
 }
 
 func (c *Client) Ack(msgId, transactionId string) error {
-	resp, err := sendRequest(c.connection, newCmdAck(msgId, transactionId))
+	_, err := sendRequest(c.connection, newCmdAck(msgId, transactionId))
 	if err != nil {
 		log.Println("failed sending ack:", err)
 		return err
 	}
 
-	log.Printf("***** DEBUG ACK:: \n%+v\n", resp)
-
-	// TODO: confirm not needed before removing this line
-	c.Response = resp
-
 	return nil
 }
 
 func (c *Client) Nack(msgId, transactionId string) error {
-	resp, err := sendRequest(c.connection, newCmdNack(msgId, transactionId))
+	_, err := sendRequest(c.connection, newCmdNack(msgId, transactionId))
 	if err != nil {
 		log.Println("failed sending nack:", err)
 		return err
 	}
-
-	log.Printf("***** DEBUG Nack:: \n%+v\n", resp)
-
-	// TODO: confirm not needed before removing this line
-	c.Response = resp
 
 	return nil
 }
@@ -416,8 +421,8 @@ func (c *Client) Receive(fn func(string, chan int), ch chan int) error {
 	reader := bufio.NewReader(c.connection)
 
 	// TODO: remove this dev limit.
-	//for i := 0; i < 1; i++ {
-	for i := 0; i < 45000; i++ {
+	for i := 0; i < 1; i++ {
+		//for i := 0; i < 45000; i++ {
 		//for {
 		resp, err := reader.ReadString('\000')
 		if err != nil {
