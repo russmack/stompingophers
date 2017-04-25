@@ -27,7 +27,7 @@ func producer() {
 	fmt.Println("Sending messages...")
 
 	for j := range gen1() {
-		err = client.Send("/queue/nooq", j)
+		err = client.Send("/queue/nooq", j, "", "")
 		if err != nil {
 			panic("failed sending: " + err.Error())
 		}
