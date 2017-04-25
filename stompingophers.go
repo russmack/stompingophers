@@ -74,7 +74,18 @@ type frame struct {
 	expectResponse bool
 }
 
+type ServerFrame struct {
+	Command string
+	Headers map[string]string
+	Body    string
+}
+
 type headers map[string]string
+
+type Header struct {
+	Key   string
+	Value string
+}
 
 func (h *headers) add(k, v string) {
 	map[string]string(*h)[k] = v
@@ -120,12 +131,84 @@ func (f *frame) addHeaderTransaction(s string) {
 	f.addHeader("transaction", s)
 }
 
+func callIfNotEmptyString(fn func(string), val string) {
+	if val != "" {
+		fn(val)
+	}
+}
+
+// Server frames
+
+func newCmdConnected() ServerFrame {
+
+	sf := ServerFrame{
+		Command: "CONNECTED",
+		Headers: map[string]string{},
+	}
+	// Must
+	sf.Headers["version"] = ""
+	// May
+	sf.Headers["heart-beat"] = ""
+	sf.Headers["session"] = ""
+	sf.Headers["server"] = ""
+
+	return sf
+}
+
+func newCmdMessage() ServerFrame {
+	sf := ServerFrame{
+		Command: "MESSAGE",
+		Headers: map[string]string{},
+	}
+	// Must
+	sf.Headers["destination"] = ""
+	sf.Headers["message-id"] = ""
+	sf.Headers["subscription"] = ""
+	// Must conditionally, if subscription requires ack
+	sf.Headers["ack"] = ""
+	// Should
+	sf.Headers["content-length"] = ""
+	sf.Headers["content-type"] = ""
+	// And all custom headers sent in source frame
+
+	return sf
+}
+
+func newCmdReceipt() ServerFrame {
+	sf := ServerFrame{
+		Command: "RECEIPT",
+		Headers: map[string]string{},
+	}
+	sf.Headers["receipt-id"] = ""
+
+	return sf
+}
+
+func newCmdError() ServerFrame {
+	sf := ServerFrame{
+		Command: "ERROR",
+		Headers: map[string]string{},
+	}
+	// Should
+	sf.Headers["message"] = ""
+	// Should conditionally, if request contained receipt header
+	sf.Headers["receipt-id"] = ""
+	// Should conditionally, if body included
+	sf.Headers["content-length"] = ""
+	sf.Headers["content-type"] = ""
+	// May contain a body
+
+	return sf
+}
+
+// Client frames
+
 func newCmdConnect(host string) frame {
 	f := frame{
 		command:        "CONNECT",
 		headers:        headers{},
 		body:           "",
-		expectResponse: true, // TODO: confirm
+		expectResponse: true, // returns CONNECTED frame
 	}
 
 	f.addHeaderAcceptVersion(SUPPORTEDVERSIONS)
@@ -147,7 +230,7 @@ func newCmdDisconnect(rcpt string) frame {
 	return f
 }
 
-func newCmdSend(queueName, body, rcpt string) frame {
+func newCmdSend(queueName, body, rcpt, txn string, custom ...Header) frame {
 	f := frame{
 		command:        "SEND",
 		headers:        headers{},
@@ -155,11 +238,18 @@ func newCmdSend(queueName, body, rcpt string) frame {
 		expectResponse: true, // TODO: confirm
 	}
 
+	// Required
 	f.addHeaderDestination(queueName)
+	// Should
 	f.addHeaderContentType("text/plain")
 	f.addHeaderContentLength()
-	// TODO: check spec if optional
-	f.addHeaderReceipt(rcpt)
+	// Allows
+	callIfNotEmptyString(f.addHeaderReceipt, rcpt)
+	callIfNotEmptyString(f.addHeaderTransaction, txn)
+	// Custom
+	for _, j := range custom {
+		f.addHeader(j.Key, j.Value)
+	}
 
 	return f
 }
@@ -341,21 +431,22 @@ func (c *Client) Disconnect() error {
 	return c.connection.Close()
 }
 
-func (c *Client) Send(queueName, msg string) error {
+func (c *Client) Send(queueName, msg, rcpt, txn string, custom ...Header) error {
 	// Server will not send a response unless either:
 	// a - receipt header is set.
 	// b - the server sends an ERROR response and disconnects.
 
-	// TODO: sort out the receipt
-	resp, err := sendRequest(c.connection, newCmdSend(queueName, msg, "rcpt-123"))
+	resp, err := sendRequest(c.connection, newCmdSend(queueName, msg, rcpt, txn, custom...))
 	if err != nil {
 		// If the server returned an error here then it will also have disconnected.
 		log.Println("failed enqueue:", err)
 		return err
 	}
-	// No error, implies a successful send.
+	// No error, implies a successful send, despite no response.
 
-	c.Response = resp
+	if rcpt != "" {
+		c.Response = resp
+	}
 
 	return nil
 }
@@ -473,21 +564,15 @@ func (c *Client) Commit(transactionId string) error {
 	return nil
 }
 
-type Message struct {
-	Command string
-	Headers map[string]string
-	Body    string
-}
-
-func ParseResponse(s string) (Message, error) {
-	msg := Message{
+func ParseResponse(s string) (ServerFrame, error) {
+	sf := ServerFrame{
 		Command: "",
 		Headers: make(map[string]string),
 	}
 	var cmd string
 	var headStart int
-	msgLen := len(s)
-	for i := 0; i < msgLen; i++ {
+	sfLen := len(s)
+	for i := 0; i < sfLen; i++ {
 		if s[i] == '\n' {
 			// TODO: investigate this anomaly -
 			// some repsonses being with '\n'
@@ -503,12 +588,12 @@ func ParseResponse(s string) (Message, error) {
 
 	if cmd == "" {
 		log.Printf("failed parsing message, no lines in: %s", s)
-		return msg, errors.New("failed parsing invalid message")
+		return sf, errors.New("failed parsing invalid message")
 	}
 
-	msg.Command = cmd
+	sf.Command = cmd
 
-	// Rest of msg, without command.
+	// Rest of sf, without command.
 	remMsg := s[headStart:]
 
 	kStart := 0
@@ -525,14 +610,14 @@ func ParseResponse(s string) (Message, error) {
 
 		if kDone && j == '\n' {
 			v = remMsg[vStart:i]
-			msg.Headers[k] = v
+			sf.Headers[k] = v
 
 			kStart = i + 1
 			kDone = false
 		}
 	}
 
-	msg.Body = remMsg[kStart:]
+	sf.Body = remMsg[kStart:]
 
-	return msg, nil
+	return sf, nil
 }
