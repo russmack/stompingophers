@@ -131,16 +131,9 @@ func (f *frame) addHeaderTransaction(s string) {
 	f.addHeader("transaction", s)
 }
 
-func callIfNotEmptyString(fn func(string), val string) {
-	if val != "" {
-		fn(val)
-	}
-}
-
 // Server frames
 
 func newCmdConnected() ServerFrame {
-
 	sf := ServerFrame{
 		Command: "CONNECTED",
 		Headers: map[string]string{},
@@ -203,6 +196,8 @@ func newCmdError() ServerFrame {
 
 // Client frames
 
+// Any client frame other than CONNECT MAY specify a receipt header
+
 func newCmdConnect(host string) frame {
 	f := frame{
 		command:        "CONNECT",
@@ -222,10 +217,13 @@ func newCmdDisconnect(rcpt string) frame {
 		command:        "DISCONNECT",
 		headers:        headers{},
 		body:           "",
-		expectResponse: true, // TODO: confirm
+		expectResponse: false,
 	}
 
-	f.addHeaderReceipt(rcpt)
+	if rcpt != "" {
+		f.addHeaderReceipt(rcpt)
+		f.expectResponse = true
+	}
 
 	return f
 }
@@ -235,17 +233,23 @@ func newCmdSend(queueName, body, rcpt, txn string, custom ...Header) frame {
 		command:        "SEND",
 		headers:        headers{},
 		body:           body,
-		expectResponse: true, // TODO: confirm
+		expectResponse: false,
+		//expectErrorResponse: true,
 	}
 
-	// Required
+	// Must
 	f.addHeaderDestination(queueName)
 	// Should
 	f.addHeaderContentType("text/plain")
 	f.addHeaderContentLength()
 	// Allows
-	callIfNotEmptyString(f.addHeaderReceipt, rcpt)
-	callIfNotEmptyString(f.addHeaderTransaction, txn)
+	if rcpt != "" {
+		f.addHeaderReceipt(rcpt)
+		f.expectResponse = true
+	}
+	if txn != "" {
+		f.addHeaderTransaction(txn)
+	}
 	// Custom
 	for _, j := range custom {
 		f.addHeader(j.Key, j.Value)
@@ -254,7 +258,7 @@ func newCmdSend(queueName, body, rcpt, txn string, custom ...Header) frame {
 	return f
 }
 
-func newCmdAck(msgId, txnId string) frame {
+func newCmdAck(msgId, rcpt, txn string) frame {
 	f := frame{
 		command:        "ACK",
 		headers:        headers{},
@@ -262,16 +266,21 @@ func newCmdAck(msgId, txnId string) frame {
 		expectResponse: false,
 	}
 
+	// Must
 	f.addHeaderId(msgId)
-
-	if txnId != "" {
-		f.addHeaderTransaction(txnId)
+	// Allows
+	if rcpt != "" {
+		f.addHeaderReceipt(rcpt)
+		f.expectResponse = true
+	}
+	if txn != "" {
+		f.addHeaderTransaction(txn)
 	}
 
 	return f
 }
 
-func newCmdNack(msgId, txnId string) frame {
+func newCmdNack(msgId, txn, rcpt string) frame {
 	f := frame{
 		command:        "NACK",
 		headers:        headers{},
@@ -279,80 +288,117 @@ func newCmdNack(msgId, txnId string) frame {
 		expectResponse: false,
 	}
 
+	// Must
 	f.addHeaderId(msgId)
-
-	if txnId != "" {
-		f.addHeaderTransaction(txnId)
+	// Allows
+	if rcpt != "" {
+		f.addHeaderReceipt(rcpt)
+		f.expectResponse = true
+	}
+	if txn != "" {
+		f.addHeaderTransaction(txn)
 	}
 
 	return f
 }
 
-func newCmdSubscribe(queueName, subId string, am AckModer) frame {
+func newCmdSubscribe(queueName, subId, rcpt string, am AckModer) frame {
 	f := frame{
 		command:        "SUBSCRIBE",
 		headers:        headers{},
 		body:           "",
-		expectResponse: true,
+		expectResponse: false,
+		//expectErrorResponse: true,
 	}
 
+	// Must
 	f.addHeaderId(subId)
 	f.addHeaderDestination(queueName)
-	f.addHeaderAck(am)
-	// TODO: decide what to do with the receipt.
-	f.addHeaderReceipt("optional-subscription-rcpt")
+	// Allows
+	if am != nil {
+		// Default is auto
+		f.addHeaderAck(am)
+	}
+	if rcpt != "" {
+		f.addHeaderReceipt(rcpt)
+		f.expectResponse = true
+	}
 
 	return f
 }
 
-func newCmdUnsubscribe(subId string) frame {
+func newCmdUnsubscribe(subId, rcpt string) frame {
 	f := frame{
 		command:        "UNSUBSCRIBE",
 		headers:        headers{},
 		body:           "",
-		expectResponse: true, // TODO: confirm
+		expectResponse: false,
 	}
 
+	// Must
 	f.addHeaderId(subId)
+	// Allows
+	if rcpt != "" {
+		f.addHeaderReceipt(rcpt)
+		f.expectResponse = true
+	}
 
 	return f
 }
 
-func newCmdBegin(txnId string) frame {
+func newCmdBegin(txn, rcpt string) frame {
 	f := frame{
 		command:        "BEGIN",
 		headers:        headers{},
 		body:           "",
-		expectResponse: true, // TODO: confirm
+		expectResponse: false,
 	}
 
-	f.addHeaderTransaction(txnId)
+	// Must
+	f.addHeaderTransaction(txn)
+	// Allows
+	if rcpt != "" {
+		f.addHeaderReceipt(rcpt)
+		f.expectResponse = true
+	}
 
 	return f
 }
 
-func newCmdAbort(txnId string) frame {
+func newCmdAbort(txn, rcpt string) frame {
 	f := frame{
 		command:        "ABORT",
 		headers:        headers{},
 		body:           "",
-		expectResponse: true, // TODO: confirm
+		expectResponse: false,
 	}
 
-	f.addHeaderTransaction(txnId)
+	// Must
+	f.addHeaderTransaction(txn)
+	// Allows
+	if rcpt != "" {
+		f.addHeaderReceipt(rcpt)
+		f.expectResponse = true
+	}
 
 	return f
 }
 
-func newCmdCommit(txnId string) frame {
+func newCmdCommit(txn, rcpt string) frame {
 	f := frame{
 		command:        "COMMIT",
 		headers:        headers{},
 		body:           "",
-		expectResponse: true, // TODO: confirm
+		expectResponse: false,
 	}
 
-	f.addHeaderTransaction(txnId)
+	// Must
+	f.addHeaderTransaction(txn)
+	// Allows
+	if rcpt != "" {
+		f.addHeaderReceipt(rcpt)
+		f.expectResponse = true
+	}
 
 	return f
 }
@@ -451,8 +497,8 @@ func (c *Client) Send(queueName, msg, rcpt, txn string, custom ...Header) error 
 	return nil
 }
 
-func (c *Client) Ack(msgId, transactionId string) error {
-	_, err := sendRequest(c.connection, newCmdAck(msgId, transactionId))
+func (c *Client) Ack(msgId, rcpt, transactionId string) error {
+	_, err := sendRequest(c.connection, newCmdAck(msgId, rcpt, transactionId))
 	if err != nil {
 		log.Println("failed sending ack:", err)
 		return err
@@ -461,8 +507,8 @@ func (c *Client) Ack(msgId, transactionId string) error {
 	return nil
 }
 
-func (c *Client) Nack(msgId, transactionId string) error {
-	_, err := sendRequest(c.connection, newCmdNack(msgId, transactionId))
+func (c *Client) Nack(msgId, transactionId, rcpt string) error {
+	_, err := sendRequest(c.connection, newCmdNack(msgId, transactionId, rcpt))
 	if err != nil {
 		log.Println("failed sending nack:", err)
 		return err
@@ -471,10 +517,10 @@ func (c *Client) Nack(msgId, transactionId string) error {
 	return nil
 }
 
-func (c *Client) Subscribe(queueName string, am AckModer) error {
+func (c *Client) Subscribe(queueName, rcpt string, am AckModer) error {
 	// Simple approach of setting id to list index.
 	subId := strconv.Itoa(len(c.Subscriptions))
-	resp, err := sendRequest(c.connection, newCmdSubscribe(queueName, subId, am))
+	resp, err := sendRequest(c.connection, newCmdSubscribe(queueName, subId, rcpt, am))
 	if err != nil {
 		log.Println("failed subscribe:", err)
 		return err
@@ -494,8 +540,8 @@ func (c *Client) Subscribe(queueName string, am AckModer) error {
 	return nil
 }
 
-func (c *Client) Unsubscribe(subId string) error {
-	resp, err := sendRequest(c.connection, newCmdUnsubscribe(subId))
+func (c *Client) Unsubscribe(subId, rcpt string) error {
+	resp, err := sendRequest(c.connection, newCmdUnsubscribe(subId, rcpt))
 	if err != nil {
 		log.Println("failed unsubscribe:", err)
 		return err
@@ -528,8 +574,8 @@ func (c *Client) Receive(fn func(string, chan int), ch chan int) error {
 	return nil
 }
 
-func (c *Client) Begin(transactionId string) error {
-	resp, err := sendRequest(c.connection, newCmdBegin(transactionId))
+func (c *Client) Begin(transactionId, rcpt string) error {
+	resp, err := sendRequest(c.connection, newCmdBegin(transactionId, rcpt))
 	if err != nil {
 		log.Println("failed begin:", err)
 		return err
@@ -540,8 +586,8 @@ func (c *Client) Begin(transactionId string) error {
 	return nil
 }
 
-func (c *Client) Abort(transactionId string) error {
-	resp, err := sendRequest(c.connection, newCmdAbort(transactionId))
+func (c *Client) Abort(transactionId, rcpt string) error {
+	resp, err := sendRequest(c.connection, newCmdAbort(transactionId, rcpt))
 	if err != nil {
 		log.Println("failed abort:", err)
 		return err
@@ -552,8 +598,8 @@ func (c *Client) Abort(transactionId string) error {
 	return nil
 }
 
-func (c *Client) Commit(transactionId string) error {
-	resp, err := sendRequest(c.connection, newCmdCommit(transactionId))
+func (c *Client) Commit(transactionId, rcpt string) error {
+	resp, err := sendRequest(c.connection, newCmdCommit(transactionId, rcpt))
 	if err != nil {
 		log.Println("failed commit:", err)
 		return err
