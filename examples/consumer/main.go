@@ -43,7 +43,7 @@ func consumer() {
 	fmt.Println("Subscribing to queue...\n")
 
 	//err = client.Subscribe("/queue/nooq", &stomper.AckModeAuto{})
-	err = client.Subscribe("/queue/nooq", &stomper.AckModeClientIndividual{})
+	err = client.Subscribe("/queue/nooq", "", &stomper.AckModeClientIndividual{})
 	if err != nil {
 		panic("failed sending: " + err.Error())
 	}
@@ -76,7 +76,7 @@ func printMessage(s string, ch chan int) {
 	} else {
 		//printer <- fmt.Sprintf("%+v\n", m)
 		msgAckId := m.Headers["ack"]
-		err := client.Ack(msgAckId, "")
+		err := client.Ack(msgAckId, "", "")
 		if err != nil {
 			fmt.Println("ack err:", err)
 		}
