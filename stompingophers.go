@@ -80,6 +80,10 @@ type ServerFrame struct {
 	Body    string
 }
 
+func (sf *ServerFrame) String() string {
+	return fmt.Sprintf("COMMAND: %s ; HEADERS: %+v ; BODY: %s", sf.Command, sf.Headers, sf.Body)
+}
+
 type headers map[string]string
 
 type Header struct {
@@ -463,8 +467,8 @@ func (c *Client) Disconnect() error {
 	// Graceful shutdown: send disconnect frame, check rcpt received, then close socket.
 	// Do not send any more frames after the DISCONNECT frame has been sent.
 
-	// TODO: sort out the receipt
-	resp, err := sendRequest(c.connection, newCmdDisconnect("rcpt-disconnect-123"))
+	rcptId := "rcpt-disconnect-123"
+	resp, err := sendRequest(c.connection, newCmdDisconnect(rcptId))
 	if err != nil {
 		log.Println("failed sending disconnect:", err)
 		return err
@@ -472,7 +476,21 @@ func (c *Client) Disconnect() error {
 
 	c.Response = resp
 
-	// TODO: Parse returned RECEIPT frame for receipt-id
+	sf, err := ParseResponse(resp)
+	if err != nil {
+		return errors.New("failed disconnecting, unable to parse response: " + err.Error())
+	}
+
+	v, ok := sf.Headers["receipt-id"]
+	if !ok || sf.Command != "RECEIPT" {
+		return errors.New("failed disconnecting, invalid receipt response: " + sf.String())
+	}
+
+	if v != rcptId {
+		return errors.New(
+			"failed disconnecting, invalid receipt id in response - " +
+				"expected: " + rcptId + ", got: " + v)
+	}
 
 	return c.connection.Close()
 }
