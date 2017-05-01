@@ -238,7 +238,7 @@ func newCmdSend(queueName, body, rcpt, txn string, custom ...Header) frame {
 		headers:        headers{},
 		body:           body,
 		expectResponse: false,
-		//expectErrorResponse: true,
+		// TODO: consider: expectErrorResponse: true,
 	}
 
 	// Must
@@ -312,7 +312,7 @@ func newCmdSubscribe(queueName, subId, rcpt string, am AckModer) frame {
 		headers:        headers{},
 		body:           "",
 		expectResponse: false,
-		//expectErrorResponse: true,
+		// TODO: consider: expectErrorResponse: true,
 	}
 
 	// Must
@@ -418,8 +418,8 @@ func formatRequest(f frame) string {
 
 	req := c + h + b + t
 
-	log.Printf("Request [dec]:\n%v\n", []byte(req))
-	log.Printf("Request [ascii]:\n%s\n", string(req))
+	//log.Printf("Request [dec]:\n%v\n", []byte(req))
+	//log.Printf("Request [ascii]:\n%s\n", string(req))
 
 	return req
 }
@@ -570,26 +570,31 @@ func (c *Client) Unsubscribe(subId, rcpt string) error {
 	return nil
 }
 
-func (c *Client) Receive(fn func(string, chan int), ch chan int) error {
+func (c *Client) Receive() chan string {
 	log.Println("Started receiving...")
 
 	reader := bufio.NewReader(c.connection)
 
+	recvChan := make(chan string)
+
 	// TODO: remove this dev limit.
-	for i := 0; i < 1; i++ {
-		//for i := 0; i < 45000; i++ {
-		//for {
-		resp, err := reader.ReadString('\000')
-		if err != nil {
-			return err
+	go func() {
+		for {
+			resp, err := reader.ReadString('\000')
+			if err != nil {
+				// TODO: convey error
+				//return err
+				//log.Printf("DEBUG RESP:\n%+v\n", resp)
+				continue
+			}
+
+			//log.Printf("DEBUG RESP:\n%+v\n", resp)
+
+			recvChan <- resp
 		}
+	}()
 
-		log.Printf("DEBUG RESP:\n%+v\n", resp)
-
-		go fn(resp, ch)
-	}
-
-	return nil
+	return recvChan
 }
 
 func (c *Client) Begin(transactionId, rcpt string) error {

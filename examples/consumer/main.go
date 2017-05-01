@@ -18,10 +18,7 @@ func main() {
 	go func() {
 		for {
 			msg := <-printer
-			fmt.Println("####################")
-			fmt.Println("Parsed response:")
-			fmt.Println(msg)
-			fmt.Println("####################")
+			_ = msg
 		}
 	}()
 	consumer()
@@ -43,7 +40,7 @@ func consumer() {
 	fmt.Println("Subscribing to queue...\n")
 
 	//err = client.Subscribe("/queue/nooq", &stomper.AckModeAuto{})
-	err = client.Subscribe("/queue/nooq", "", &stomper.AckModeClientIndividual{})
+	err = client.Subscribe("/queue/nooq", "mysubrcpt", &stomper.AckModeClientIndividual{})
 	if err != nil {
 		panic("failed sending: " + err.Error())
 	}
@@ -55,32 +52,28 @@ func consumer() {
 	}
 	fmt.Println("Parsed subscribe response:\n", msg)
 
-	done := make(chan int)
+	// TODO: consider adding error channel.
+	recvChan := client.Receive()
 
-	go client.Receive(printMessage, done)
-
-	// For dev purposes.
-	//for i := 0; i < 45000; i++ {
-	for i := 0; i < 1; i++ {
-		//for i := 0; i < 4; i++ {
-		<-done
-	}
-
-	client.Disconnect()
-}
-
-func printMessage(s string, ch chan int) {
-	m, err := stomper.ParseResponse(s)
-	if err != nil {
-		printer <- "failed parsing message: " + err.Error()
-	} else {
-		//printer <- fmt.Sprintf("%+v\n", m)
-		msgAckId := m.Headers["ack"]
-		err := client.Ack(msgAckId, "", "")
+	fin := 0
+	for s := range recvChan {
+		f, err := stomper.ParseResponse(s)
+		if err != nil {
+			fmt.Println("response parse err:", err)
+			continue
+		}
+		msgAckId := f.Headers["ack"]
+		err = client.Ack(msgAckId, "", "")
 		if err != nil {
 			fmt.Println("ack err:", err)
+			continue
+		}
+		printer <- fmt.Sprintf("%+v\n", f)
+		fin = fin + 1
+		if fin == 44999 {
+			break
 		}
 	}
 
-	ch <- 1
+	client.Disconnect()
 }
