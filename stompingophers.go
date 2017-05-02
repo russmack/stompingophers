@@ -26,29 +26,6 @@ func init() {
 	}
 }
 
-// AckModer is a Golang enum abomination.  TODO: learn to embed Rust.
-type AckModer interface {
-	getAckMode() string
-}
-
-type AckModeAuto struct{}
-type AckModeClient struct{}
-type AckModeClientIndividual struct{}
-
-func (a *AckModeAuto) getAckMode() string {
-	return ACKMODE_AUTO
-}
-
-func (a *AckModeClient) getAckMode() string {
-	return ACKMODE_CLIENT
-}
-
-func (a *AckModeClientIndividual) getAckMode() string {
-	return ACKMODE_CLIENTINDIVIDUAL
-}
-
-// End of AckMode enum abomination.
-
 type Client struct {
 	connection    net.Conn
 	Response      string
@@ -127,8 +104,14 @@ func (f *frame) addHeaderId(s string) {
 	f.addHeader("id", s)
 }
 
-func (f *frame) addHeaderAck(am AckModer) {
-	f.addHeader("ack", am.getAckMode())
+func (f *frame) addHeaderAck(am string) {
+	if am != ACKMODE_AUTO &&
+		am != ACKMODE_CLIENT &&
+		am != ACKMODE_CLIENTINDIVIDUAL {
+		am = ACKMODE_AUTO
+		log.Println("Invalid ack mode, using default: auto.")
+	}
+	f.addHeader("ack", am)
 }
 
 func (f *frame) addHeaderTransaction(s string) {
@@ -306,7 +289,7 @@ func newCmdNack(msgId, txn, rcpt string) frame {
 	return f
 }
 
-func newCmdSubscribe(queueName, subId, rcpt string, am AckModer) frame {
+func newCmdSubscribe(queueName, subId, rcpt string, am string) frame {
 	f := frame{
 		command:        "SUBSCRIBE",
 		headers:        headers{},
@@ -319,7 +302,7 @@ func newCmdSubscribe(queueName, subId, rcpt string, am AckModer) frame {
 	f.addHeaderId(subId)
 	f.addHeaderDestination(queueName)
 	// Allows
-	if am != nil {
+	if am != "" {
 		// Default is auto
 		f.addHeaderAck(am)
 	}
@@ -535,7 +518,7 @@ func (c *Client) Nack(msgId, transactionId, rcpt string) error {
 	return nil
 }
 
-func (c *Client) Subscribe(queueName, rcpt string, am AckModer) error {
+func (c *Client) Subscribe(queueName, rcpt string, am string) error {
 	// Simple approach of setting id to list index.
 	subId := strconv.Itoa(len(c.Subscriptions))
 	resp, err := sendRequest(c.connection, newCmdSubscribe(queueName, subId, rcpt, am))
@@ -550,7 +533,7 @@ func (c *Client) Subscribe(queueName, rcpt string, am AckModer) error {
 			Name: queueName,
 			Type: "not implemented",
 		},
-		AckMode: am.getAckMode(),
+		AckMode: am,
 	})
 
 	c.Response = resp
@@ -656,7 +639,7 @@ func ParseResponse(s string) (ServerFrame, error) {
 	}
 
 	if cmd == "" {
-		log.Printf("failed parsing message, no lines in: %s", s)
+		log.Printf("failed parsing message, no lines in: '%s'", s)
 		return sf, errors.New("failed parsing invalid message")
 	}
 
