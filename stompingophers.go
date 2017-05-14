@@ -560,20 +560,28 @@ func (c *Client) Receive() chan string {
 
 	recvChan := make(chan string)
 
-	// TODO: remove this dev limit.
 	go func() {
 		for {
 			resp, err := reader.ReadString('\000')
 			if err != nil {
 				// TODO: convey error
 				//return err
-				//log.Printf("DEBUG RESP:\n%+v\n", resp)
 				continue
 			}
 
-			//log.Printf("DEBUG RESP:\n%+v\n", resp)
-
 			recvChan <- resp
+
+			// Remove end of packet newline.
+			b, err := reader.Peek(1)
+			if err != nil {
+				log.Println("failed reading bytes after \\x0:", err)
+			}
+			if b[0] == '\n' {
+				_, err := reader.ReadByte()
+				if err != nil {
+					log.Println("failed reading final newline:", err)
+				}
+			}
 		}
 	}()
 
@@ -624,14 +632,9 @@ func ParseResponse(s string) (ServerFrame, error) {
 	var cmd string
 	var headStart int
 	sfLen := len(s)
+
 	for i := 0; i < sfLen; i++ {
 		if s[i] == '\n' {
-			// TODO: investigate this anomaly -
-			// some repsonses being with '\n'
-			if i == 0 {
-				// Ignore \n if it is the first response character.
-				continue
-			}
 			cmd = s[:i]
 			headStart = i + 1
 			break
