@@ -68,7 +68,6 @@ func gen2() chan string {
 		for i := 0; i < 4500; i++ {
 			for _, j := range orders {
 				c <- j
-				//time.Sleep(2 * time.Second)
 			}
 		}
 		close(c)

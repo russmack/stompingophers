@@ -68,8 +68,8 @@ type Header struct {
 	Value string
 }
 
-func (h *headers) add(k, v string) {
-	map[string]string(*h)[k] = v
+func (h headers) add(k, v string) {
+	h[k] = v
 }
 
 func (f *frame) addHeader(k, v string) {

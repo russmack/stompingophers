@@ -57,7 +57,6 @@ func consumer() {
 	// TODO: consider adding error channel.
 	recvChan := client.Receive()
 
-	//fin := 0
 	for s := range recvChan {
 		f, err := stomper.ParseResponse(s)
 		if err != nil {
@@ -75,10 +74,6 @@ func consumer() {
 		}
 
 		printer <- fmt.Sprintf("%+v\n", f)
-		//fin = fin + 1
-		//if fin == 44999 {
-		//	break
-		//}
 	}
 
 	client.Disconnect()
