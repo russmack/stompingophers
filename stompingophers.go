@@ -19,7 +19,8 @@ const (
 )
 
 func init() {
-	logEnabled := true
+	// TODO: remove or move.
+	logEnabled := false
 	if !logEnabled {
 		log.SetFlags(0)
 		log.SetOutput(ioutil.Discard)

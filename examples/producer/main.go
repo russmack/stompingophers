@@ -36,6 +36,11 @@ func producer() {
 	client.Disconnect()
 }
 
+//
+// Message content generators functions.
+//
+
+// gen1 generates small messages.
 func gen1() chan string {
 	c := make(chan string)
 
@@ -49,6 +54,7 @@ func gen1() chan string {
 	return c
 }
 
+// gen2 generates big json messages.
 func gen2() chan string {
 	c := make(chan string)
 	orders := []string{
