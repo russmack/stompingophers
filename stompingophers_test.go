@@ -2,6 +2,9 @@ package stompingophers
 
 import (
 	"testing"
+
+	"bufio"
+	"net"
 )
 
 func Benchmark_formatRequest(b *testing.B) {
@@ -46,6 +49,50 @@ func Benchmark_connect(b *testing.B) {
 	}
 }
 
+func Benchmark_newCmdConnect(b *testing.B) {
+	b.ReportAllocs()
+
+	h := "127.0.0.1"
+
+	for i := 0; i < b.N; i++ {
+		_ = newCmdConnect(h)
+	}
+}
+
+func Benchmark_sendRequest(b *testing.B) {
+	b.ReportAllocs()
+
+	response := `CONNECTED
+server:MockMQ/1.00.0
+heart-beat:0,0
+session:ID:Russ-MBP-53014-1496183632740-3:9384
+version:1.2
+
+` + "\000"
+
+	h := "127.0.0.1"
+	f := newCmdConnect(h)
+
+	cliconn, srvconn := net.Pipe()
+
+	go func() {
+		for {
+			_, _ = bufio.NewReader(srvconn).ReadBytes('\000')
+			srvconn.Write([]byte(response))
+		}
+	}()
+
+	for i := 0; i < b.N; i++ {
+		_, err := sendRequest(cliconn, f)
+		if err != nil {
+			b.Error(err)
+		}
+	}
+
+	cliconn.Close()
+	srvconn.Close()
+}
+
 func Benchmark_subscribe(b *testing.B) {
 	b.ReportAllocs()
 
@@ -63,15 +110,5 @@ func Benchmark_subscribe(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		_ = client.Subscribe(queue, rcpt, ackmode)
-	}
-}
-
-func Benchmark_newCmdConnect(b *testing.B) {
-	b.ReportAllocs()
-
-	h := "127.0.0.1"
-
-	for i := 0; i < b.N; i++ {
-		_ = newCmdConnect(h)
 	}
 }
