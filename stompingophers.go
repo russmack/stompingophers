@@ -410,17 +410,18 @@ func formatRequest(f frame) string {
 
 func sendRequest(conn net.Conn, fr frame) (string, error) {
 	req := formatRequest(fr)
-	fmt.Fprintf(conn, req)
+	conn.Write([]byte(req))
 
 	if !fr.expectResponse {
 		return "", nil
 	}
 
-	resp, err := bufio.NewReader(conn).ReadString('\000')
+	resp, err := bufio.NewReader(conn).ReadBytes('\000')
 	if err != nil {
 		return "", err
 	}
-	return resp, nil
+
+	return string(resp), nil
 }
 
 func Connect(host string, port int) (Client, error) {
