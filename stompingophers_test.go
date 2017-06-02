@@ -5,6 +5,8 @@ import (
 
 	"bufio"
 	"net"
+	"strconv"
+	"sync"
 )
 
 func Benchmark_formatRequest(b *testing.B) {
@@ -38,15 +40,88 @@ Well, hello, number 16790!
 	}
 }
 
-func Benchmark_connect(b *testing.B) {
+func Benchmark_NewConnections(b *testing.B) {
 	b.ReportAllocs()
 
-	queueIp := "127.0.0.1"
-	queuePort := 61613
+	h := "127.0.0.1"
+	p := 61613
+
+	port := ":" + strconv.Itoa(p)
+
+	ln, err := net.Listen("tcp", port)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	done := make(chan bool)
+
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		for i := 0; i < b.N; i++ {
+			conn, err := NewConnection(h, p)
+			if err != nil {
+				b.Fatal(err)
+			}
+			conn.Close()
+
+			if i >= b.N-1 {
+				done <- true
+				ln.Close()
+			} else {
+				done <- false
+			}
+		}
+		wg.Done()
+	}()
+
+	wg.Add(1)
+	go func() {
+		for {
+			_, err := ln.Accept()
+			if err != nil {
+				b.Fatal(err)
+			}
+			//c.Close()
+
+			exit := <-done
+			if exit {
+				break
+			}
+		}
+		wg.Done()
+	}()
+
+	wg.Wait()
+}
+
+func Benchmark_Connect(b *testing.B) {
+	b.ReportAllocs()
+
+	response := `CONNECTED
+server:MockMQ/1.00.0
+heart-beat:0,0
+session:ID:Russ-MBP-53014-1496183632740-3:9384
+version:1.2
+
+` + "\000"
+
+	cliconn, srvconn := net.Pipe()
+
+	go func() {
+		for {
+			_, _ = bufio.NewReader(srvconn).ReadBytes('\000')
+			srvconn.Write([]byte(response))
+		}
+	}()
 
 	for i := 0; i < b.N; i++ {
-		_, _ = Connect(queueIp, queuePort)
+		_, _ = Connect(cliconn)
 	}
+
+	cliconn.Close()
+	srvconn.Close()
 }
 
 func Benchmark_newCmdConnect(b *testing.B) {
@@ -96,12 +171,38 @@ version:1.2
 func Benchmark_subscribe(b *testing.B) {
 	b.ReportAllocs()
 
-	queueIp := "127.0.0.1"
-	queuePort := 61613
+	response := `CONNECTED
+server:MockMQ/1.00.0
+heart-beat:0,0
+session:ID:Russ-MBP-53014-1496183632740-3:9384
+version:1.2
 
-	client, err := Connect(queueIp, queuePort)
+` + "\000"
+
+	subscribeResponse := `CONNECTED
+server:MockMQ/1.00.0
+heart-beat:0,0
+session:ID:Russ-MBP-53014-1496183632740-3:9384
+version:1.2
+
+` + "\000"
+
+	cliconn, srvconn := net.Pipe()
+
+	go func() {
+		for {
+			_, _ = bufio.NewReader(srvconn).ReadBytes('\000')
+			srvconn.Write([]byte(response))
+
+			_, _ = bufio.NewReader(srvconn).ReadBytes('\000')
+			srvconn.Write([]byte(subscribeResponse))
+
+		}
+	}()
+
+	client, err := Connect(cliconn)
 	if err != nil {
-		panic("failed connecting: " + err.Error())
+		b.Error(err)
 	}
 
 	queue := "/queue/nooq"
