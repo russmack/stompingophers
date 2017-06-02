@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 
 	stomper "github.com/russmack/stompingophers"
 )
@@ -12,7 +13,6 @@ var (
 )
 
 func main() {
-
 	printer = make(chan string)
 
 	go func() {
@@ -22,7 +22,6 @@ func main() {
 		}
 	}()
 	consumer()
-
 }
 
 func consumer() {
@@ -30,9 +29,14 @@ func consumer() {
 	queuePort := 61613
 
 	var err error
-	client, err = stomper.Connect(queueIp, queuePort)
+	conn, err := stomper.NewConnection(queueIp, queuePort)
 	if err != nil {
-		panic("failed connecting: " + err.Error())
+		log.Fatal(err)
+	}
+
+	client, err = stomper.Connect(conn)
+	if err != nil {
+		log.Fatal("failed connecting: " + err.Error())
 	}
 
 	fmt.Println("Consuming messages...")
@@ -44,7 +48,7 @@ func consumer() {
 
 	err = client.Subscribe("/queue/nooq", "mysubrcpt", am)
 	if err != nil {
-		panic("failed sending: " + err.Error())
+		log.Fatal("failed sending: " + err.Error())
 	}
 
 	fmt.Println("\nRaw subscribe response:\n", client.Response)

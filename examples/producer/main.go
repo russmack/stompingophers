@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"strconv"
 
 	stomper "github.com/russmack/stompingophers"
@@ -17,9 +18,14 @@ func producer() {
 	queueIp := "127.0.0.1"
 	queuePort := 61613
 
-	client, err := stomper.Connect(queueIp, queuePort)
+	conn, err := stomper.NewConnection(queueIp, queuePort)
 	if err != nil {
-		panic("failed connecting: " + err.Error())
+		log.Fatal(err)
+	}
+
+	client, err := stomper.Connect(conn)
+	if err != nil {
+		log.Fatal("failed connecting: " + err.Error())
 	}
 
 	fmt.Printf("Connection response:\n%s\n", client.Response)
@@ -29,7 +35,7 @@ func producer() {
 	for j := range gen1() {
 		err = client.Send("/queue/nooq", j, "", "")
 		if err != nil {
-			panic("failed sending: " + err.Error())
+			log.Fatal("failed sending: " + err.Error())
 		}
 	}
 

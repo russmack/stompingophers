@@ -424,17 +424,13 @@ func sendRequest(conn net.Conn, fr frame) (string, error) {
 	return string(resp), nil
 }
 
-func Connect(host string, port int) (Client, error) {
+func NewConnection(host string, port int) (net.Conn, error) {
 	addr := host + ":" + strconv.Itoa(port)
+	return net.Dial("tcp", addr)
+}
 
-	log.Println("Connecting to:", addr)
-
-	conn, err := net.Dial("tcp", addr)
-	if err != nil {
-		return Client{}, err
-	}
-
-	resp, err := sendRequest(conn, newCmdConnect(host))
+func Connect(conn net.Conn) (Client, error) {
+	resp, err := sendRequest(conn, newCmdConnect(conn.RemoteAddr().String()))
 	if err != nil {
 		log.Println("failed connecting:", err)
 		return Client{}, err
