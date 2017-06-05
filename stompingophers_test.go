@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"bufio"
+	//"fmt"
 	"net"
 	"strconv"
 	"sync"
@@ -14,6 +15,7 @@ func Benchmark_formatRequest(b *testing.B) {
 
 	f := frame{command: "command", headers: headers{}, body: "body", expectResponse: false}
 
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = formatRequest(f)
 	}
@@ -35,12 +37,13 @@ timestamp:1496183739815
 Well, hello, number 16790!
 `
 
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _ = ParseResponse(s)
 	}
 }
 
-func Benchmark_NewConnections(b *testing.B) {
+func Benchmark_NewConnection(b *testing.B) {
 	b.ReportAllocs()
 
 	h := "127.0.0.1"
@@ -59,6 +62,7 @@ func Benchmark_NewConnections(b *testing.B) {
 
 	wg.Add(1)
 	go func() {
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			conn, err := NewConnection(h, p)
 			if err != nil {
@@ -116,6 +120,7 @@ version:1.2
 		}
 	}()
 
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _ = Connect(cliconn)
 	}
@@ -129,6 +134,7 @@ func Benchmark_newCmdConnect(b *testing.B) {
 
 	h := "127.0.0.1"
 
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = newCmdConnect(h)
 	}
@@ -157,6 +163,7 @@ version:1.2
 		}
 	}()
 
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, err := sendRequest(cliconn, f)
 		if err != nil {
@@ -179,11 +186,8 @@ version:1.2
 
 ` + "\000"
 
-	subscribeResponse := `CONNECTED
-server:MockMQ/1.00.0
-heart-beat:0,0
-session:ID:Russ-MBP-53014-1496183632740-3:9384
-version:1.2
+	subscribeResponse := `RECEIPT
+receipt-id:mysubrcpt
 
 ` + "\000"
 
@@ -209,6 +213,7 @@ version:1.2
 	rcpt := "mysubrcpt"
 	ackmode := ACKMODE_AUTO
 
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = client.Subscribe(queue, rcpt, ackmode)
 	}
