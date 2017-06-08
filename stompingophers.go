@@ -4,8 +4,6 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"io/ioutil"
-	"log"
 	"net"
 	"strconv"
 )
@@ -13,19 +11,11 @@ import (
 const (
 	SUPPORTEDVERSIONS string = "1.0,1.1,1.2"
 
+	// TODO: replace these with a struct and validating ctor until Go gets proper enums.
 	ACKMODE_AUTO             string = "auto"
 	ACKMODE_CLIENT           string = "client"
 	ACKMODE_CLIENTINDIVIDUAL string = "client-individual"
 )
-
-func init() {
-	// TODO: remove or move.
-	logEnabled := false
-	if !logEnabled {
-		log.SetFlags(0)
-		log.SetOutput(ioutil.Discard)
-	}
-}
 
 type Client struct {
 	connection    net.Conn
@@ -105,14 +95,15 @@ func (f *frame) addHeaderId(s string) {
 	f.addHeader("id", s)
 }
 
-func (f *frame) addHeaderAck(am string) {
+func (f *frame) addHeaderAck(am string) error {
+	// Server will use auto by default.
 	if am != ACKMODE_AUTO &&
 		am != ACKMODE_CLIENT &&
 		am != ACKMODE_CLIENTINDIVIDUAL {
-		am = ACKMODE_AUTO
-		log.Println("Invalid ack mode, using default: auto.")
+		return errors.New("invalid ack mode")
 	}
 	f.addHeader("ack", am)
+	return nil
 }
 
 func (f *frame) addHeaderTransaction(s string) {
@@ -290,7 +281,7 @@ func newCmdNack(msgId, txn, rcpt string) frame {
 	return f
 }
 
-func newCmdSubscribe(queueName, subId, rcpt string, am string) frame {
+func newCmdSubscribe(queueName, subId, rcpt string, am string) (frame, error) {
 	f := frame{
 		command:        "SUBSCRIBE",
 		headers:        headers{},
@@ -304,15 +295,18 @@ func newCmdSubscribe(queueName, subId, rcpt string, am string) frame {
 	f.addHeaderDestination(queueName)
 	// Allows
 	if am != "" {
-		// Default is auto
-		f.addHeaderAck(am)
+		err := f.addHeaderAck(am)
+		if err != nil {
+			return f, err
+		}
 	}
+
 	if rcpt != "" {
 		f.addHeaderReceipt(rcpt)
 		f.expectResponse = true
 	}
 
-	return f
+	return f, nil
 }
 
 func newCmdUnsubscribe(subId, rcpt string) frame {
@@ -429,8 +423,7 @@ func NewConnection(host string, port int) (net.Conn, error) {
 func Connect(conn net.Conn) (Client, error) {
 	resp, err := sendRequest(conn, newCmdConnect(conn.RemoteAddr().String()))
 	if err != nil {
-		log.Println("failed connecting:", err)
-		return Client{}, err
+		return Client{}, fmt.Errorf("failed connecting: %s", err)
 	}
 
 	client := Client{
@@ -448,8 +441,7 @@ func (c *Client) Disconnect() error {
 	rcptId := "rcpt-disconnect-123"
 	resp, err := sendRequest(c.connection, newCmdDisconnect(rcptId))
 	if err != nil {
-		log.Println("failed sending disconnect:", err)
-		return err
+		return fmt.Errorf("failed sending disconnect: %s", err)
 	}
 
 	c.Response = resp
@@ -474,6 +466,7 @@ func (c *Client) Disconnect() error {
 }
 
 func (c *Client) Send(queueName, msg, rcpt, txn string, custom ...Header) error {
+	// Default ack mode is auto.
 	// Server will not send a response unless either:
 	// a - receipt header is set.
 	// b - the server sends an ERROR response and disconnects.
@@ -481,8 +474,7 @@ func (c *Client) Send(queueName, msg, rcpt, txn string, custom ...Header) error 
 	resp, err := sendRequest(c.connection, newCmdSend(queueName, msg, rcpt, txn, custom...))
 	if err != nil {
 		// If the server returned an error here then it will also have disconnected.
-		log.Println("failed enqueue:", err)
-		return err
+		return fmt.Errorf("failed enqueue: %s", err)
 	}
 	// No error, implies a successful send, despite no response.
 
@@ -496,8 +488,7 @@ func (c *Client) Send(queueName, msg, rcpt, txn string, custom ...Header) error 
 func (c *Client) Ack(msgId, rcpt, transactionId string) error {
 	_, err := sendRequest(c.connection, newCmdAck(msgId, rcpt, transactionId))
 	if err != nil {
-		log.Println("failed sending ack:", err)
-		return err
+		return fmt.Errorf("failed sending ack: %s", err)
 	}
 
 	return nil
@@ -506,8 +497,7 @@ func (c *Client) Ack(msgId, rcpt, transactionId string) error {
 func (c *Client) Nack(msgId, transactionId, rcpt string) error {
 	_, err := sendRequest(c.connection, newCmdNack(msgId, transactionId, rcpt))
 	if err != nil {
-		log.Println("failed sending nack:", err)
-		return err
+		return fmt.Errorf("failed sending nack: %s", err)
 	}
 
 	return nil
@@ -516,10 +506,13 @@ func (c *Client) Nack(msgId, transactionId, rcpt string) error {
 func (c *Client) Subscribe(queueName, rcpt string, am string) error {
 	// Simple approach of setting id to list index.
 	subId := strconv.Itoa(len(c.Subscriptions))
-	resp, err := sendRequest(c.connection, newCmdSubscribe(queueName, subId, rcpt, am))
+	f, err := newCmdSubscribe(queueName, subId, rcpt, am)
 	if err != nil {
-		log.Println("failed subscribe:", err)
-		return err
+		return fmt.Errorf("failed creating subscribe command: %s", err)
+	}
+	resp, err := sendRequest(c.connection, f)
+	if err != nil {
+		return fmt.Errorf("failed subscribing: %s", err)
 	}
 
 	c.Subscriptions = append(c.Subscriptions, Subscription{
@@ -539,8 +532,7 @@ func (c *Client) Subscribe(queueName, rcpt string, am string) error {
 func (c *Client) Unsubscribe(subId, rcpt string) error {
 	resp, err := sendRequest(c.connection, newCmdUnsubscribe(subId, rcpt))
 	if err != nil {
-		log.Println("failed unsubscribe:", err)
-		return err
+		return fmt.Errorf("failed unsubscribing: %s", err)
 	}
 
 	c.Response = resp
@@ -549,8 +541,6 @@ func (c *Client) Unsubscribe(subId, rcpt string) error {
 }
 
 func (c *Client) Receive() (chan string, chan error) {
-	log.Println("Started receiving...")
-
 	reader := bufio.NewReader(c.connection)
 
 	recvChan := make(chan string)
@@ -560,7 +550,7 @@ func (c *Client) Receive() (chan string, chan error) {
 		for {
 			resp, err := reader.ReadString('\000')
 			if err != nil {
-				errChan <- err
+				errChan <- fmt.Errorf("failed reading response: %s", err)
 				continue
 			}
 
@@ -569,12 +559,12 @@ func (c *Client) Receive() (chan string, chan error) {
 			// Remove end of packet newline.
 			b, err := reader.Peek(1)
 			if err != nil {
-				log.Println("failed reading bytes after \\x0:", err)
+				errChan <- fmt.Errorf("failed reading bytes after \\x0: %s", err)
 			}
 			if b[0] == '\n' {
 				_, err := reader.ReadByte()
 				if err != nil {
-					log.Println("failed reading final newline:", err)
+					errChan <- fmt.Errorf("failed reading final newline: %s", err)
 				}
 			}
 		}
@@ -586,8 +576,7 @@ func (c *Client) Receive() (chan string, chan error) {
 func (c *Client) Begin(transactionId, rcpt string) error {
 	resp, err := sendRequest(c.connection, newCmdBegin(transactionId, rcpt))
 	if err != nil {
-		log.Println("failed begin:", err)
-		return err
+		return fmt.Errorf("failed transaction begin: %s", err)
 	}
 
 	c.Response = resp
@@ -598,7 +587,7 @@ func (c *Client) Begin(transactionId, rcpt string) error {
 func (c *Client) Abort(transactionId, rcpt string) error {
 	resp, err := sendRequest(c.connection, newCmdAbort(transactionId, rcpt))
 	if err != nil {
-		log.Println("failed abort:", err)
+		fmt.Errorf("failed abort: %s", err)
 		return err
 	}
 
@@ -610,7 +599,7 @@ func (c *Client) Abort(transactionId, rcpt string) error {
 func (c *Client) Commit(transactionId, rcpt string) error {
 	resp, err := sendRequest(c.connection, newCmdCommit(transactionId, rcpt))
 	if err != nil {
-		log.Println("failed commit:", err)
+		fmt.Errorf("failed commit: %s", err)
 		return err
 	}
 
@@ -637,8 +626,7 @@ func ParseResponse(s string) (ServerFrame, error) {
 	}
 
 	if cmd == "" {
-		log.Printf("failed parsing message, no lines in: '%s'", s)
-		return sf, errors.New("failed parsing invalid message")
+		return sf, fmt.Errorf("failed parsing invalid message, no lines in: '%s'", s)
 	}
 
 	sf.Command = cmd
