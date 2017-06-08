@@ -402,9 +402,6 @@ func formatRequest(f frame) string {
 
 	req := c + h + b + t
 
-	//log.Printf("Request [dec]:\n%v\n", []byte(req))
-	//log.Printf("Request [ascii]:\n%s\n", string(req))
-
 	return req
 }
 
@@ -551,19 +548,19 @@ func (c *Client) Unsubscribe(subId, rcpt string) error {
 	return nil
 }
 
-func (c *Client) Receive() chan string {
+func (c *Client) Receive() (chan string, chan error) {
 	log.Println("Started receiving...")
 
 	reader := bufio.NewReader(c.connection)
 
 	recvChan := make(chan string)
+	errChan := make(chan error)
 
 	go func() {
 		for {
 			resp, err := reader.ReadString('\000')
 			if err != nil {
-				// TODO: convey error
-				//return err
+				errChan <- err
 				continue
 			}
 
@@ -583,7 +580,7 @@ func (c *Client) Receive() chan string {
 		}
 	}()
 
-	return recvChan
+	return recvChan, errChan
 }
 
 func (c *Client) Begin(transactionId, rcpt string) error {
