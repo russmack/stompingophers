@@ -11,11 +11,19 @@ import (
 const (
 	SUPPORTEDVERSIONS string = "1.0,1.1,1.2"
 
-	// TODO: replace these with a struct and validating ctor until Go gets proper enums.
 	ACKMODE_AUTO             string = "auto"
 	ACKMODE_CLIENT           string = "client"
 	ACKMODE_CLIENTINDIVIDUAL string = "client-individual"
 )
+
+func isValidAckMode(mode string) bool {
+	if mode != ACKMODE_AUTO &&
+		mode != ACKMODE_CLIENT &&
+		mode != ACKMODE_CLIENTINDIVIDUAL {
+		return false
+	}
+	return true
+}
 
 type Client struct {
 	connection    net.Conn
@@ -95,15 +103,8 @@ func (f *frame) addHeaderId(s string) {
 	f.addHeader("id", s)
 }
 
-func (f *frame) addHeaderAck(am string) error {
-	// Server will use auto by default.
-	if am != ACKMODE_AUTO &&
-		am != ACKMODE_CLIENT &&
-		am != ACKMODE_CLIENTINDIVIDUAL {
-		return errors.New("invalid ack mode")
-	}
+func (f *frame) addHeaderAck(am string) {
 	f.addHeader("ack", am)
-	return nil
 }
 
 func (f *frame) addHeaderTransaction(s string) {
@@ -295,10 +296,10 @@ func newCmdSubscribe(queueName, subId, rcpt string, am string) (frame, error) {
 	f.addHeaderDestination(queueName)
 	// Allows
 	if am != "" {
-		err := f.addHeaderAck(am)
-		if err != nil {
-			return f, err
+		if !isValidAckMode(am) {
+			return f, errors.New("invalid ack mode")
 		}
+		f.addHeaderAck(am)
 	}
 
 	if rcpt != "" {
