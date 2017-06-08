@@ -58,26 +58,30 @@ func consumer() {
 	}
 	fmt.Println("Parsed subscribe response:\n", msg)
 
-	// TODO: consider adding error channel.
-	recvChan := client.Receive()
+	recvChan, errChan := client.Receive()
 
-	for s := range recvChan {
-		f, err := stomper.ParseResponse(s)
-		if err != nil {
-			fmt.Println("response parse err:", err)
-			continue
-		}
-
-		if am != stomper.ACKMODE_AUTO {
-			msgAckId := f.Headers["ack"]
-			err = client.Ack(msgAckId, "", "")
+	for {
+		select {
+		case err := <-errChan:
+			log.Printf("This is unfortunate, but the show must go on.  (err: %s)", err)
+		case s := <-recvChan:
+			f, err := stomper.ParseResponse(s)
 			if err != nil {
-				fmt.Println("ack err:", err)
+				fmt.Println("response parse err:", err)
 				continue
 			}
-		}
 
-		printer <- fmt.Sprintf("%+v\n", f)
+			if am != stomper.ACKMODE_AUTO {
+				msgAckId := f.Headers["ack"]
+				err = client.Ack(msgAckId, "", "")
+				if err != nil {
+					fmt.Println("failed sending ack:", err)
+					continue
+				}
+			}
+
+			printer <- fmt.Sprintf("%+v\n", f)
+		}
 	}
 
 	client.Disconnect()
