@@ -2,39 +2,79 @@ package stompingophers
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"strconv"
 )
 
 const (
-	SUPPORTEDVERSIONS string = "1.0,1.1,1.2"
+	SupportedVersions = "1.0,1.1,1.2"
+	ContentTypeText   = "text/plain"
+	CmdConnect        = "CONNECT"
+	CmdConnected      = "CONNECTED"
+	CmdMessage        = "MESSAGE"
+	CmdReceipt        = "RECEIPT"
+	CmdError          = "ERROR"
+	CmdDisconnect     = "DISCONNECT"
+	CmdSend           = "SEND"
+	CmdAck            = "ACK"
+	CmdNack           = "NACK"
+	CmdSubscribe      = "SUBSCRIBE"
+	CmdUnsubscribe    = "UNSUBSCRIBE"
+	CmdBegin          = "BEGIN"
+	CmdAbort          = "ABORT"
+	CmdCommit         = "COMMIT"
 
-	ACKMODE_AUTO             string = "auto"
-	ACKMODE_CLIENT           string = "client"
-	ACKMODE_CLIENTINDIVIDUAL string = "client-individual"
+	HeaderAcceptVersion = "accept-version"
+	HeaderHost          = "host"
+	HeaderContentLength = "content-length"
+	HeaderReceipt       = "receipt"
+	HeaderReceiptID     = "receipt-id"
+	HeaderDestination   = "destination"
+	HeaderContentType   = "content-type"
+	HeaderID            = "id"
+	HeaderAck           = "ack"
+	HeaderTransaction   = "transaction"
+
+	byteNull     = 0x00
+	byteLineFeed = 0x0a
+	byteColon    = 0x3a
+
+	AckModeAuto             int = 0
+	AckModeClient           int = 1
+	AckModeClientIndividual int = 2
+
+	ackModeStringAuto             string = "auto"
+	ackModeStringClient           string = "client"
+	ackModeStringClientIndividual string = "client-individual"
 )
 
-func isValidAckMode(mode string) bool {
-	if mode != ACKMODE_AUTO &&
-		mode != ACKMODE_CLIENT &&
-		mode != ACKMODE_CLIENTINDIVIDUAL {
-		return false
+func parseAckModeInt(n int) (string, error) {
+	switch n {
+	case AckModeAuto:
+		return ackModeStringAuto, nil
+	case AckModeClient:
+		return ackModeStringClient, nil
+	case AckModeClientIndividual:
+		return ackModeStringClientIndividual, nil
+	default:
+		return "", errors.New("invalid ack mode")
 	}
-	return true
 }
 
 type Client struct {
 	connection    net.Conn
-	Response      string
+	Response      []byte
 	Subscriptions []Subscription
 }
 
 type Subscription struct {
-	Id      string
+	ID      string
 	Channel Channel
-	AckMode string
+	AckMode int
 }
 
 type Channel struct {
@@ -46,130 +86,139 @@ type Channel struct {
 type frame struct {
 	command        string
 	headers        headers
-	body           string
+	body           []byte
 	expectResponse bool
 }
 
 type ServerFrame struct {
 	Command string
-	Headers map[string]string
-	Body    string
+	Headers map[string][]byte
+	Body    []byte
 }
 
 func (sf *ServerFrame) String() string {
 	return fmt.Sprintf("COMMAND: %s ; HEADERS: %+v ; BODY: %s", sf.Command, sf.Headers, sf.Body)
 }
 
-type headers map[string]string
+type headers map[string][]byte
 
 type Header struct {
 	Key   string
 	Value string
 }
 
-func (h headers) add(k, v string) {
+func (h headers) add(k string, v []byte) {
 	h[k] = v
 }
 
 func (f *frame) addHeader(k, v string) {
-	f.headers.add(k, v)
+	f.headers.add(k, []byte(v))
 }
 
 func (f *frame) addHeaderAcceptVersion(s string) {
-	f.addHeader("accept-version", s)
+	f.addHeader(HeaderAcceptVersion, s)
 }
 
 func (f *frame) addHeaderHost(s string) {
-	f.addHeader("host", s)
+	f.addHeader(HeaderHost, s)
 }
 
 func (f *frame) addHeaderContentLength() {
-	f.addHeader("content-length", strconv.Itoa(len(f.body)+1))
+	f.addHeader(HeaderContentLength, strconv.Itoa(len(f.body)+1))
 }
 
 func (f *frame) addHeaderReceipt(s string) {
-	f.addHeader("receipt", s)
+	f.addHeader(HeaderReceipt, s)
 }
 
 func (f *frame) addHeaderDestination(s string) {
-	f.addHeader("destination", s)
+	f.addHeader(HeaderDestination, s)
 }
 
 func (f *frame) addHeaderContentType(s string) {
-	f.addHeader("content-type", s)
+	f.addHeader(HeaderContentType, s)
 }
 
-func (f *frame) addHeaderId(s string) {
-	f.addHeader("id", s)
+func (f *frame) addHeaderID(s string) {
+	f.addHeader(HeaderID, s)
 }
 
 func (f *frame) addHeaderAck(am string) {
-	f.addHeader("ack", am)
+	f.addHeader(HeaderAck, am)
 }
 
 func (f *frame) addHeaderTransaction(s string) {
-	f.addHeader("transaction", s)
+	f.addHeader(HeaderTransaction, s)
 }
 
 // Server frames
 
-func newCmdConnected() ServerFrame {
-	sf := ServerFrame{
-		Command: "CONNECTED",
-		Headers: map[string]string{},
+func newServerFrame(c string) ServerFrame {
+	return ServerFrame{
+		Command: c,
+		Headers: map[string][]byte{},
 	}
+}
+
+func newCmdConnected() ServerFrame {
+	sf := newServerFrame(CmdConnected)
+
 	// Must
-	sf.Headers["version"] = ""
+	sf.Headers["version"] = nil
+
 	// May
-	sf.Headers["heart-beat"] = ""
-	sf.Headers["session"] = ""
-	sf.Headers["server"] = ""
+	sf.Headers["heart-beat"] = nil
+	sf.Headers["session"] = nil
+	sf.Headers["server"] = nil
 
 	return sf
 }
 
 func newCmdMessage() ServerFrame {
-	sf := ServerFrame{
-		Command: "MESSAGE",
-		Headers: map[string]string{},
-	}
+	sf := newServerFrame(CmdMessage)
+
 	// Must
-	sf.Headers["destination"] = ""
-	sf.Headers["message-id"] = ""
-	sf.Headers["subscription"] = ""
+	// Destination should be identical to the one used
+	// in the corresponding SEND frame
+	sf.Headers["destination"] = nil
+	sf.Headers["message-id"] = nil
+	sf.Headers["subscription"] = nil
+
 	// Must conditionally, if subscription requires ack
-	sf.Headers["ack"] = ""
-	// Should
-	sf.Headers["content-length"] = ""
-	sf.Headers["content-type"] = ""
-	// And all custom headers sent in source frame
+	// Used to relate to a subsequent ACK or NACK frame.
+	sf.Headers["ack"] = nil
+
+	// Should, if a body is present
+	sf.Headers["content-length"] = nil
+	sf.Headers["content-type"] = nil
+
+	// And all user defined headers sent in source frame
 
 	return sf
 }
 
 func newCmdReceipt() ServerFrame {
-	sf := ServerFrame{
-		Command: "RECEIPT",
-		Headers: map[string]string{},
-	}
-	sf.Headers["receipt-id"] = ""
+	sf := newServerFrame(CmdReceipt)
+
+	sf.Headers["receipt-id"] = nil
 
 	return sf
 }
 
 func newCmdError() ServerFrame {
-	sf := ServerFrame{
-		Command: "ERROR",
-		Headers: map[string]string{},
-	}
+	sf := newServerFrame(CmdError)
+
 	// Should
-	sf.Headers["message"] = ""
+	sf.Headers["message"] = nil
+
 	// Should conditionally, if request contained receipt header
-	sf.Headers["receipt-id"] = ""
+	sf.Headers["receipt-id"] = nil
+
 	// Should conditionally, if body included
-	sf.Headers["content-length"] = ""
-	sf.Headers["content-type"] = ""
-	// May contain a body
+	sf.Headers["content-length"] = nil
+	sf.Headers["content-type"] = nil
+
+	// May contain a body with more detail error info.
 
 	return sf
 }
@@ -180,23 +229,29 @@ func newCmdError() ServerFrame {
 
 func newCmdConnect(host string) frame {
 	f := frame{
-		command:        "CONNECT",
-		headers:        headers{},
-		body:           "",
+		command:        CmdConnect,
+		body:           nil,
 		expectResponse: true, // returns CONNECTED frame
+		headers:        headers{},
 	}
 
-	f.addHeaderAcceptVersion(SUPPORTEDVERSIONS)
+	// Must
+	f.addHeaderAcceptVersion(SupportedVersions)
 	f.addHeaderHost(host)
+
+	// May
+	// login
+	// passcode
+	// heartbeat
 
 	return f
 }
 
 func newCmdDisconnect(rcpt string) frame {
 	f := frame{
-		command:        "DISCONNECT",
+		command:        CmdDisconnect,
 		headers:        headers{},
-		body:           "",
+		body:           nil,
 		expectResponse: false,
 	}
 
@@ -208,9 +263,9 @@ func newCmdDisconnect(rcpt string) frame {
 	return f
 }
 
-func newCmdSend(queueName, body, rcpt, txn string, custom ...Header) frame {
+func newCmdSend(queueName string, body []byte, rcpt, txn string, custom ...Header) frame {
 	f := frame{
-		command:        "SEND",
+		command:        CmdSend,
 		headers:        headers{},
 		body:           body,
 		expectResponse: false,
@@ -219,9 +274,11 @@ func newCmdSend(queueName, body, rcpt, txn string, custom ...Header) frame {
 
 	// Must
 	f.addHeaderDestination(queueName)
+
 	// Should
-	f.addHeaderContentType("text/plain")
+	f.addHeaderContentType(ContentTypeText)
 	f.addHeaderContentLength()
+
 	// Allows
 	if rcpt != "" {
 		f.addHeaderReceipt(rcpt)
@@ -230,6 +287,7 @@ func newCmdSend(queueName, body, rcpt, txn string, custom ...Header) frame {
 	if txn != "" {
 		f.addHeaderTransaction(txn)
 	}
+
 	// Custom
 	for _, j := range custom {
 		f.addHeader(j.Key, j.Value)
@@ -238,16 +296,17 @@ func newCmdSend(queueName, body, rcpt, txn string, custom ...Header) frame {
 	return f
 }
 
-func newCmdAck(msgId, rcpt, txn string) frame {
+func newCmdAck(msgID, rcpt, txn string) frame {
 	f := frame{
-		command:        "ACK",
+		command:        CmdAck,
 		headers:        headers{},
-		body:           "",
+		body:           nil,
 		expectResponse: false,
 	}
 
 	// Must
-	f.addHeaderId(msgId)
+	f.addHeaderID(msgID)
+
 	// Allows
 	if rcpt != "" {
 		f.addHeaderReceipt(rcpt)
@@ -260,16 +319,17 @@ func newCmdAck(msgId, rcpt, txn string) frame {
 	return f
 }
 
-func newCmdNack(msgId, txn, rcpt string) frame {
+func newCmdNack(msgID, txn, rcpt string) frame {
 	f := frame{
-		command:        "NACK",
+		command:        CmdNack,
 		headers:        headers{},
-		body:           "",
+		body:           nil,
 		expectResponse: false,
 	}
 
 	// Must
-	f.addHeaderId(msgId)
+	f.addHeaderID(msgID)
+
 	// Allows
 	if rcpt != "" {
 		f.addHeaderReceipt(rcpt)
@@ -282,25 +342,25 @@ func newCmdNack(msgId, txn, rcpt string) frame {
 	return f
 }
 
-func newCmdSubscribe(queueName, subId, rcpt string, am string) (frame, error) {
+func newCmdSubscribe(queueName, subID, rcpt string, am int) (frame, error) {
 	f := frame{
-		command:        "SUBSCRIBE",
+		command:        CmdSubscribe,
 		headers:        headers{},
-		body:           "",
+		body:           nil,
 		expectResponse: false,
 		// TODO: consider: expectErrorResponse: true,
 	}
 
 	// Must
-	f.addHeaderId(subId)
+	f.addHeaderID(subID)
 	f.addHeaderDestination(queueName)
+
 	// Allows
-	if am != "" {
-		if !isValidAckMode(am) {
-			return f, errors.New("invalid ack mode")
-		}
-		f.addHeaderAck(am)
+	a, err := parseAckModeInt(am)
+	if err != nil {
+		return f, err
 	}
+	f.addHeaderAck(a)
 
 	if rcpt != "" {
 		f.addHeaderReceipt(rcpt)
@@ -310,16 +370,17 @@ func newCmdSubscribe(queueName, subId, rcpt string, am string) (frame, error) {
 	return f, nil
 }
 
-func newCmdUnsubscribe(subId, rcpt string) frame {
+func newCmdUnsubscribe(subID, rcpt string) frame {
 	f := frame{
-		command:        "UNSUBSCRIBE",
+		command:        CmdUnsubscribe,
 		headers:        headers{},
-		body:           "",
+		body:           nil,
 		expectResponse: false,
 	}
 
 	// Must
-	f.addHeaderId(subId)
+	f.addHeaderID(subID)
+
 	// Allows
 	if rcpt != "" {
 		f.addHeaderReceipt(rcpt)
@@ -331,14 +392,15 @@ func newCmdUnsubscribe(subId, rcpt string) frame {
 
 func newCmdBegin(txn, rcpt string) frame {
 	f := frame{
-		command:        "BEGIN",
+		command:        CmdBegin,
 		headers:        headers{},
-		body:           "",
+		body:           nil,
 		expectResponse: false,
 	}
 
 	// Must
 	f.addHeaderTransaction(txn)
+
 	// Allows
 	if rcpt != "" {
 		f.addHeaderReceipt(rcpt)
@@ -350,14 +412,15 @@ func newCmdBegin(txn, rcpt string) frame {
 
 func newCmdAbort(txn, rcpt string) frame {
 	f := frame{
-		command:        "ABORT",
+		command:        CmdAbort,
 		headers:        headers{},
-		body:           "",
+		body:           nil,
 		expectResponse: false,
 	}
 
 	// Must
 	f.addHeaderTransaction(txn)
+
 	// Allows
 	if rcpt != "" {
 		f.addHeaderReceipt(rcpt)
@@ -369,14 +432,15 @@ func newCmdAbort(txn, rcpt string) frame {
 
 func newCmdCommit(txn, rcpt string) frame {
 	f := frame{
-		command:        "COMMIT",
+		command:        CmdCommit,
 		headers:        headers{},
-		body:           "",
+		body:           nil,
 		expectResponse: false,
 	}
 
 	// Must
 	f.addHeaderTransaction(txn)
+
 	// Allows
 	if rcpt != "" {
 		f.addHeaderReceipt(rcpt)
@@ -386,61 +450,72 @@ func newCmdCommit(txn, rcpt string) frame {
 	return f
 }
 
-func formatRequest(f frame) string {
-	c := f.command + "\n"
-	h := ""
+func formatRequest(f frame) []byte {
+	var b bytes.Buffer
+
+	b.WriteString(f.command)
+	b.WriteByte(byteLineFeed)
+
 	for k, v := range f.headers {
-		h += k + ":" + v + "\n"
+		b.WriteString(k)
+		b.WriteByte(byteColon)
+		b.Write(v)
+		b.WriteByte(byteLineFeed)
 	}
-	b := "\n" + f.body + "\n"
-	t := "\000"
 
-	req := c + h + b + t
+	b.WriteByte(byteLineFeed)
+	b.Write(f.body)
+	b.WriteByte(byteLineFeed)
 
-	return req
+	b.WriteByte(byteNull)
+
+	return b.Bytes()
 }
 
-func sendRequest(conn net.Conn, fr frame) (string, error) {
-	req := formatRequest(fr)
-	conn.Write([]byte(req))
-
-	if !fr.expectResponse {
-		return "", nil
-	}
-
-	resp, err := bufio.NewReader(conn).ReadBytes('\000')
+func sendRequest(c io.ReadWriter, f frame) ([]byte, error) {
+	req := formatRequest(f)
+	_, err := c.Write(req)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	return string(resp), nil
+	if !f.expectResponse {
+		return nil, nil
+	}
+
+	r, err := bufio.NewReader(c).ReadBytes(byteNull)
+	if err != nil {
+		return nil, err
+	}
+
+	return r, nil
 }
 
 func NewConnection(host string, port int) (net.Conn, error) {
-	addr := host + ":" + strconv.Itoa(port)
-	return net.Dial("tcp", addr)
+	var b bytes.Buffer
+	b.WriteString(host)
+	b.WriteByte(byteColon)
+	b.Write(intToByteSlice(port))
+	return net.Dial("tcp", b.String())
 }
 
-func Connect(conn net.Conn) (Client, error) {
+func Connect(conn net.Conn) (Client, []byte, error) {
 	resp, err := sendRequest(conn, newCmdConnect(conn.RemoteAddr().String()))
 	if err != nil {
-		return Client{}, fmt.Errorf("failed connecting: %s", err)
+		return Client{}, nil, fmt.Errorf("failed connecting: %s", err)
 	}
 
-	client := Client{
+	return Client{
 		connection: conn,
-		Response:   resp,
-	}
-
-	return client, nil
+	}, resp, nil
 }
 
 func (c *Client) Disconnect() error {
 	// Graceful shutdown: send disconnect frame, check rcpt received, then close socket.
 	// Do not send any more frames after the DISCONNECT frame has been sent.
 
-	rcptId := "rcpt-disconnect-123"
-	resp, err := sendRequest(c.connection, newCmdDisconnect(rcptId))
+	rcptID := "rcpt-disconnect-123"
+	resp, err := sendRequest(c.connection, newCmdDisconnect(rcptID))
 	if err != nil {
 		return fmt.Errorf("failed sending disconnect: %s", err)
 	}
@@ -452,42 +527,43 @@ func (c *Client) Disconnect() error {
 		return errors.New("failed disconnecting, unable to parse response: " + err.Error())
 	}
 
-	v, ok := sf.Headers["receipt-id"]
-	if !ok || sf.Command != "RECEIPT" {
-		return errors.New("failed disconnecting, invalid receipt response: " + sf.String())
+	v, ok := sf.Headers[HeaderReceiptID]
+	if !ok || sf.Command != CmdReceipt {
 	}
 
-	if v != rcptId {
+	if string(v) != rcptID {
 		return errors.New(
 			"failed disconnecting, invalid receipt id in response - " +
-				"expected: " + rcptId + ", got: " + v)
+				"expected: " + rcptID + ", got: " + string(v))
 	}
 
 	return c.connection.Close()
 }
 
-func (c *Client) Send(queueName, msg, rcpt, txn string, custom ...Header) error {
+func (c *Client) Send(queue string, msg []byte, rcpt, txn string, custom ...Header) ([]byte, error) {
 	// Default ack mode is auto.
 	// Server will not send a response unless either:
 	// a - receipt header is set.
 	// b - the server sends an ERROR response and disconnects.
 
-	resp, err := sendRequest(c.connection, newCmdSend(queueName, msg, rcpt, txn, custom...))
+	resp, err := sendRequest(
+		c.connection, newCmdSend(
+			queue,
+			msg,
+			rcpt,
+			txn,
+			custom...))
 	if err != nil {
 		// If the server returned an error here then it will also have disconnected.
-		return fmt.Errorf("failed enqueue: %s", err)
+		return nil, fmt.Errorf("failed enqueue: %s", err)
 	}
 	// No error, implies a successful send, despite no response.
 
-	if rcpt != "" {
-		c.Response = resp
-	}
-
-	return nil
+	return resp, nil
 }
 
-func (c *Client) Ack(msgId, rcpt, transactionId string) error {
-	_, err := sendRequest(c.connection, newCmdAck(msgId, rcpt, transactionId))
+func (c *Client) Ack(msgID, rcpt, transactionID string) error {
+	_, err := sendRequest(c.connection, newCmdAck(msgID, rcpt, transactionID))
 	if err != nil {
 		return fmt.Errorf("failed sending ack: %s", err)
 	}
@@ -495,8 +571,8 @@ func (c *Client) Ack(msgId, rcpt, transactionId string) error {
 	return nil
 }
 
-func (c *Client) Nack(msgId, transactionId, rcpt string) error {
-	_, err := sendRequest(c.connection, newCmdNack(msgId, transactionId, rcpt))
+func (c *Client) Nack(msgID, transactionID, rcpt string) error {
+	_, err := sendRequest(c.connection, newCmdNack(msgID, transactionID, rcpt))
 	if err != nil {
 		return fmt.Errorf("failed sending nack: %s", err)
 	}
@@ -504,52 +580,58 @@ func (c *Client) Nack(msgId, transactionId, rcpt string) error {
 	return nil
 }
 
-func (c *Client) Subscribe(queueName, rcpt string, am string) error {
-	// Simple approach of setting id to list index.
-	subId := strconv.Itoa(len(c.Subscriptions))
-	f, err := newCmdSubscribe(queueName, subId, rcpt, am)
-	if err != nil {
-		return fmt.Errorf("failed creating subscribe command: %s", err)
-	}
-	resp, err := sendRequest(c.connection, f)
-	if err != nil {
-		return fmt.Errorf("failed subscribing: %s", err)
-	}
+func intToByteSlice(n int) []byte {
+	return []byte(strconv.Itoa(n))
+}
 
-	c.Subscriptions = append(c.Subscriptions, Subscription{
-		Id: subId,
+func (c *Client) Subscribe(queueName, rcpt string, am int) (Subscription, []byte, error) {
+	// Simple approach of setting subscription id to list index.
+	// Might need to be enhanced in future.
+	subID := strconv.Itoa(len(c.Subscriptions))
+
+	sub := Subscription{
+		ID: subID,
 		Channel: Channel{
 			Name: queueName,
 			Type: "not implemented",
 		},
 		AckMode: am,
-	})
-
-	c.Response = resp
-
-	return nil
-}
-
-func (c *Client) Unsubscribe(subId, rcpt string) error {
-	resp, err := sendRequest(c.connection, newCmdUnsubscribe(subId, rcpt))
-	if err != nil {
-		return fmt.Errorf("failed unsubscribing: %s", err)
 	}
 
-	c.Response = resp
+	f, err := newCmdSubscribe(queueName, subID, rcpt, am)
+	if err != nil {
+		return sub, nil, fmt.Errorf("failed creating subscribe command: %s", err)
+	}
 
-	return nil
+	resp, err := sendRequest(c.connection, f)
+	if err != nil {
+		return sub, nil, fmt.Errorf("failed subscribing: %s", err)
+	}
+
+	c.Subscriptions = append(c.Subscriptions, sub)
+
+	return sub, resp, nil
 }
 
-func (c *Client) Receive() (chan string, chan error) {
+func (c *Client) Unsubscribe(subID, rcpt string) ([]byte, error) {
+	resp, err := sendRequest(c.connection, newCmdUnsubscribe(subID, rcpt))
+	if err != nil {
+		return nil, fmt.Errorf("failed unsubscribing: %s", err)
+	}
+
+	return resp, nil
+}
+
+func (c *Client) Receive() (chan []byte, chan error) {
+	c.Response = nil
 	reader := bufio.NewReader(c.connection)
 
-	recvChan := make(chan string)
+	recvChan := make(chan []byte)
 	errChan := make(chan error)
 
 	go func() {
 		for {
-			resp, err := reader.ReadString('\000')
+			resp, err := reader.ReadBytes(byteNull)
 			if err != nil {
 				errChan <- fmt.Errorf("failed reading response: %s", err)
 				continue
@@ -557,12 +639,13 @@ func (c *Client) Receive() (chan string, chan error) {
 
 			recvChan <- resp
 
-			// Remove end of packet newline.
+			// Remove end of packet newline,
+			// otherwise next packet starts with newline.
 			b, err := reader.Peek(1)
 			if err != nil {
 				errChan <- fmt.Errorf("failed reading bytes after \\x0: %s", err)
 			}
-			if b[0] == '\n' {
+			if b[0] == byteLineFeed {
 				_, err := reader.ReadByte()
 				if err != nil {
 					errChan <- fmt.Errorf("failed reading final newline: %s", err)
@@ -574,89 +657,90 @@ func (c *Client) Receive() (chan string, chan error) {
 	return recvChan, errChan
 }
 
-func (c *Client) Begin(transactionId, rcpt string) error {
-	resp, err := sendRequest(c.connection, newCmdBegin(transactionId, rcpt))
+func (c *Client) Begin(transactionID, rcpt string) ([]byte, error) {
+	resp, err := sendRequest(c.connection, newCmdBegin(transactionID, rcpt))
 	if err != nil {
-		return fmt.Errorf("failed transaction begin: %s", err)
+		return nil, fmt.Errorf("failed transaction begin: %s", err)
 	}
 
-	c.Response = resp
-
-	return nil
+	return resp, nil
 }
 
-func (c *Client) Abort(transactionId, rcpt string) error {
-	resp, err := sendRequest(c.connection, newCmdAbort(transactionId, rcpt))
+func (c *Client) Abort(transactionID, rcpt string) ([]byte, error) {
+	resp, err := sendRequest(c.connection, newCmdAbort(transactionID, rcpt))
 	if err != nil {
-		fmt.Errorf("failed abort: %s", err)
-		return err
+		return nil, fmt.Errorf("failed abort: %s", err)
 	}
 
-	c.Response = resp
-
-	return nil
+	return resp, nil
 }
 
-func (c *Client) Commit(transactionId, rcpt string) error {
-	resp, err := sendRequest(c.connection, newCmdCommit(transactionId, rcpt))
+func (c *Client) Commit(transactionID, rcpt string) ([]byte, error) {
+	resp, err := sendRequest(c.connection, newCmdCommit(transactionID, rcpt))
 	if err != nil {
-		fmt.Errorf("failed commit: %s", err)
-		return err
+		return nil, fmt.Errorf("failed commit: %s", err)
 	}
 
-	c.Response = resp
-
-	return nil
+	return resp, nil
 }
 
-func ParseResponse(s string) (ServerFrame, error) {
-	sf := ServerFrame{
-		Command: "",
-		Headers: make(map[string]string),
-	}
+func ParseResponse(s []byte) (ServerFrame, error) {
 	var cmd string
-	var headStart int
-	sfLen := len(s)
 
-	for i := 0; i < sfLen; i++ {
-		if s[i] == '\n' {
-			cmd = s[:i]
-			headStart = i + 1
+	sz := len(s)
+
+	headerStart := 0
+	for i := 0; i < sz; i++ {
+		if s[i] == byteLineFeed {
+			cmd = string(s[:i])
+			headerStart = i + 1
 			break
 		}
 	}
 
 	if cmd == "" {
-		return sf, fmt.Errorf("failed parsing invalid message, no lines in: '%s'", s)
+		return ServerFrame{}, errors.New("failed parsing invalid message, no lines")
 	}
 
-	sf.Command = cmd
+	f := newServerFrame(cmd)
 
-	// Rest of sf, without command.
-	remMsg := s[headStart:]
+	// Rest of f, without command.
+	msg := s[headerStart:]
 
-	kStart := 0
-	kDone := false
-	vStart := 0
-	var k string
-	var v string
-	for i, j := range remMsg {
-		if !kDone && j == ':' {
-			k = remMsg[kStart:i]
-			vStart = i + 1
-			kDone = true
+	tokStart := 0
+	var k []byte
+	var v []byte
+	i := 0
+
+Headers:
+	for {
+	Key:
+		for {
+			if msg[i] == byteColon {
+				k = msg[tokStart:i]
+				tokStart = i + 1
+				break Key
+			}
+			i++
 		}
-
-		if kDone && j == '\n' {
-			v = remMsg[vStart:i]
-			sf.Headers[k] = v
-
-			kStart = i + 1
-			kDone = false
+	Val:
+		for {
+			if msg[i] == byteLineFeed {
+				v = msg[tokStart:i]
+				f.Headers[string(k)] = v
+				i++
+				tokStart = i
+				if msg[i] == byteLineFeed {
+					i++
+					break Headers
+				}
+				break Val
+			}
+			i++
 		}
 	}
 
-	sf.Body = remMsg[kStart:]
+	f.Body = msg[i:]
 
-	return sf, nil
+	return f, nil
 }

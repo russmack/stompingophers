@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"bufio"
-	//"fmt"
+	"bytes"
 	"net"
 	"strconv"
 	"sync"
@@ -13,7 +13,10 @@ import (
 func Benchmark_formatRequest(b *testing.B) {
 	b.ReportAllocs()
 
-	f := frame{command: "command", headers: headers{}, body: "body", expectResponse: false}
+	f := frame{command: "command",
+		headers:        headers{},
+		body:           []byte("body"),
+		expectResponse: false}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -21,10 +24,35 @@ func Benchmark_formatRequest(b *testing.B) {
 	}
 }
 
+func Test_ParseResponse(t *testing.T) {
+	s := []byte(`MESSAGE
+content-length:27
+expires:0
+destination:/queue/nooq
+subscription:0
+priority:4
+message-id:ID\cRuss-MBP-53014-1496183632740-3\c2\c-1\c1\c16791
+content-type:text/plain
+timestamp:1496183739815
+
+Well, hello,: number 16790!
+`)
+
+	sf, err := ParseResponse(s)
+	if err != nil {
+		t.Error("failed parsing response:", err)
+	}
+
+	expected := []byte("Well, hello,: number 16790!\n")
+	if !bytes.Equal(sf.Body, expected) {
+		t.Error("Expected:", string(expected), "\nGot:", string(sf.Body))
+	}
+}
+
 func Benchmark_ParseResponse(b *testing.B) {
 	b.ReportAllocs()
 
-	s := `MESSAGE
+	s := []byte(`MESSAGE
 content-length:27
 expires:0
 destination:/queue/nooq
@@ -35,7 +63,7 @@ content-type:text/plain
 timestamp:1496183739815
 
 Well, hello, number 16790!
-`
+`)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -122,7 +150,7 @@ version:1.2
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = Connect(cliconn)
+		_, _, _ = Connect(cliconn)
 	}
 
 	cliconn.Close()
@@ -204,17 +232,17 @@ receipt-id:mysubrcpt
 		}
 	}()
 
-	client, err := Connect(cliconn)
+	client, _, err := Connect(cliconn)
 	if err != nil {
 		b.Error(err)
 	}
 
 	queue := "/queue/nooq"
 	rcpt := "mysubrcpt"
-	ackmode := ACKMODE_AUTO
+	ackmode := AckModeAuto
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = client.Subscribe(queue, rcpt, ackmode)
+		_, _, _ = client.Subscribe(queue, rcpt, ackmode)
 	}
 }

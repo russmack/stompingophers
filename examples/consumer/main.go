@@ -8,12 +8,12 @@ import (
 )
 
 var (
-	printer chan string
+	printer chan stomper.ServerFrame
 	client  stomper.Client
 )
 
 func main() {
-	printer = make(chan string)
+	printer = make(chan stomper.ServerFrame)
 
 	go func() {
 		for {
@@ -21,42 +21,54 @@ func main() {
 			_ = msg
 		}
 	}()
-	consumer()
+	c := connect()
+	sub := subscribe(c)
+	consumer(c, sub)
 }
 
-func consumer() {
-	queueIp := "127.0.0.1"
+func connect() *stomper.Client {
+	queueIP := "127.0.0.1"
 	queuePort := 61613
 
 	var err error
-	conn, err := stomper.NewConnection(queueIp, queuePort)
+	conn, err := stomper.NewConnection(queueIP, queuePort)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	client, err = stomper.Connect(conn)
+	client, resp, err := stomper.Connect(conn)
 	if err != nil {
 		log.Fatal("failed connecting: " + err.Error())
 	}
 
-	fmt.Println("Consuming messages...")
+	f, err := stomper.ParseResponse(resp)
+	if err != nil {
+		log.Fatal("failed parsing connect response:", err)
+	}
+	fmt.Printf("Conneced: %+v\n", f)
 
+	return &client
+}
+
+func subscribe(client *stomper.Client) stomper.Subscription {
 	fmt.Println("Subscribing to queue...\n")
 
-	am := stomper.ACKMODE_AUTO
-	//am := stomper.ACKMODE_CLIENTINDIVIDUAL
-
-	err = client.Subscribe("/queue/nooq", "mysubrcpt", am)
+	sub, resp, err := client.Subscribe("/queue/nooq", "mysubrcpt", stomper.AckModeAuto)
 	if err != nil {
 		log.Fatal("failed sending: " + err.Error())
 	}
 
-	fmt.Println("\nRaw subscribe response:\n", client.Response)
-	msg, err := stomper.ParseResponse(client.Response)
+	msg, err := stomper.ParseResponse(resp)
 	if err != nil {
 		fmt.Println("failed parsing subscribe response:", err)
 	}
-	fmt.Println("Parsed subscribe response:\n", msg)
+	fmt.Printf("Parsed subscribe response:\n%s\n", string(msg.Headers["receipt-id"]))
+
+	return sub
+}
+
+func consumer(client *stomper.Client, sub stomper.Subscription) {
+	defer client.Disconnect()
 
 	recvChan, errChan := client.Receive()
 
@@ -71,18 +83,16 @@ func consumer() {
 				continue
 			}
 
-			if am != stomper.ACKMODE_AUTO {
-				msgAckId := f.Headers["ack"]
-				err = client.Ack(msgAckId, "", "")
+			if sub.AckMode != stomper.AckModeAuto {
+				msgAckID := string(f.Headers["ack"])
+				err = client.Ack(msgAckID, "", "")
 				if err != nil {
 					fmt.Println("failed sending ack:", err)
 					continue
 				}
 			}
-
-			printer <- fmt.Sprintf("%+v\n", f)
+			printer <- f
 		}
 	}
 
-	client.Disconnect()
 }
