@@ -1,39 +1,45 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"strconv"
 
+	//"github.com/pkg/profile"
 	stomper "github.com/russmack/stompingophers"
 )
 
 func main() {
+	//defer profile.Start(profile.MemProfile, profile.ProfilePath(".")).Stop()
+	//defer profile.Start(profile.CPUProfile, profile.ProfilePath(".")).Stop()
 
 	producer()
-
 }
 
 func producer() {
-	queueIp := "127.0.0.1"
+	queueIP := "127.0.0.1"
 	queuePort := 61613
 
-	conn, err := stomper.NewConnection(queueIp, queuePort)
+	conn, err := stomper.NewConnection(queueIP, queuePort)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	client, err := stomper.Connect(conn)
+	client, resp, err := stomper.Connect(conn)
 	if err != nil {
 		log.Fatal("failed connecting: " + err.Error())
 	}
 
-	fmt.Printf("Connection response:\n%s\n", client.Response)
+	fmt.Printf("Connection response:\n%s\n", resp)
 
 	fmt.Println("Sending messages...")
 
-	for j := range gen1() {
-		err = client.Send("/queue/nooq", j, "", "")
+	gen := gen2 //gen1
+
+	for j := range gen() {
+		_, err = client.Send("/queue/nooq", j, "", "")
 		if err != nil {
 			log.Fatal("failed sending: " + err.Error())
 		}
@@ -60,25 +66,17 @@ func gen1() chan string {
 	return c
 }
 
-// gen2 generates big json messages.
-func gen2() chan string {
-	c := make(chan string)
-	orders := []string{
-		json_01,
-		json_02,
-		json_03,
-		json_04,
-		json_05,
-		json_06,
-		json_07,
-		json_08,
-		json_09,
-		json_10,
-	}
+// gen2 generates big json messages, from specified file.
+func gen2() chan []byte {
+	j := readJSONFile("unconfirmed-transactions.json")
+
+	objects := splitJSONArray(j)
+
+	c := make(chan []byte)
 
 	go func() {
 		for i := 0; i < 4500; i++ {
-			for _, j := range orders {
+			for _, j := range objects {
 				c <- j
 			}
 		}
@@ -88,61 +86,34 @@ func gen2() chan string {
 	return c
 }
 
-const json_01 = `
-{  
-	"big_json_message":"abcdefg",
-}
-`
+func readJSONFile(fname string) []byte {
+	f, err := ioutil.ReadFile(fname)
+	if err != nil {
+		log.Fatal("failed reading json data file:", err)
+	}
 
-const json_02 = `
-{  
-	"big_json_message":"abcdefg",
+	return f
 }
-`
 
-const json_03 = `
-{  
-	"big_json_message":"abcdefg",
-}
-`
-const json_04 = `
-{  
-	"big_json_message":"abcdefg",
-}
-`
+func splitJSONArray(b []byte) [][]byte {
+	var j interface{}
 
-const json_05 = `
-{  
-	"big_json_message":"abcdefg",
-}
-`
+	err := json.Unmarshal(b, &j)
+	if err != nil {
+		log.Fatal("failed to parse json data:", err)
+	}
 
-const json_06 = `
-{  
-	"big_json_message":"abcdefg",
-}
-`
+	li := [][]byte{}
 
-const json_07 = `
-{  
-	"big_json_message":"abcdefg",
-}
-`
+	for _, v := range j.(map[string]interface{}) {
+		for _, vv := range v.([]interface{}) {
+			o, err := json.Marshal(vv)
+			if err != nil {
+				log.Println("failed to marshal json to obj:", err)
+			}
+			li = append(li, o)
+		}
+	}
 
-const json_08 = `
-{  
-	"big_json_message":"abcdefg",
+	return li
 }
-`
-
-const json_09 = `
-{  
-	"big_json_message":"abcdefg",
-}
-`
-
-const json_10 = `
-{  
-	"big_json_message":"abcdefg",
-}
-`
