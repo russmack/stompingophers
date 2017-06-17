@@ -120,60 +120,6 @@ type Header struct {
 	Value string
 }
 
-/*
-func (h headers) add(k string, v []byte) {
-	h[k] = v
-}
-
-func (f *frame) addHeader(k, v string) {
-	f.headers.add(k, []byte(v))
-}
-*/
-func (f *frame) addHeaderAcceptVersion(s string) {
-	//f.addHeader(HeaderAcceptVersion, s)
-	f.headers.AcceptVersion = []byte(s)
-}
-
-func (f *frame) addHeaderHost(s string) {
-	//f.addHeader(HeaderHost, s)
-	f.headers.Host = []byte(s)
-}
-
-func (f *frame) addHeaderContentLength() {
-	//f.addHeader(HeaderContentLength, strconv.Itoa(len(f.body)+1))
-	f.headers.ContentLength = []byte(strconv.Itoa(len(f.body) + 1))
-}
-
-func (f *frame) addHeaderReceipt(s string) {
-	//f.addHeader(HeaderReceipt, s)
-	f.headers.Receipt = []byte(s)
-}
-
-func (f *frame) addHeaderDestination(s string) {
-	//f.addHeader(HeaderDestination, s)
-	f.headers.Destination = []byte(s)
-}
-
-func (f *frame) addHeaderContentType(s string) {
-	//f.addHeader(HeaderContentType, s)
-	f.headers.ContentType = []byte(s)
-}
-
-func (f *frame) addHeaderID(s string) {
-	//f.addHeader(HeaderID, s)
-	f.headers.ID = []byte(s)
-}
-
-func (f *frame) addHeaderAck(am string) {
-	//f.addHeader(HeaderAck, am)
-	f.headers.Ack = []byte(am)
-}
-
-func (f *frame) addHeaderTransaction(s string) {
-	//f.addHeader(HeaderTransaction, s)
-	f.headers.Transaction = []byte(s)
-}
-
 // Server frames
 
 func newServerFrame(c string) ServerFrame {
@@ -259,8 +205,8 @@ func newCmdConnect(host string) frame {
 	}
 
 	// Must
-	f.addHeaderAcceptVersion(SupportedVersions)
-	f.addHeaderHost(host)
+	f.headers.AcceptVersion = []byte(SupportedVersions)
+	f.headers.Host = []byte(host)
 
 	// May
 	// login
@@ -279,7 +225,7 @@ func newCmdDisconnect(rcpt string) frame {
 	}
 
 	if rcpt != "" {
-		f.addHeaderReceipt(rcpt)
+		f.headers.Receipt = []byte(rcpt)
 		f.expectResponse = true
 	}
 
@@ -296,19 +242,19 @@ func newCmdSend(queueName string, body []byte, rcpt, txn string, custom ...Heade
 	}
 
 	// Must
-	f.addHeaderDestination(queueName)
+	f.headers.Destination = []byte(queueName)
 
 	// Should
-	f.addHeaderContentType(ContentTypeText)
-	f.addHeaderContentLength()
+	f.headers.ContentType = []byte(ContentTypeText)
+	f.headers.ContentLength = []byte(strconv.Itoa(len(body) + 1))
 
 	// Allows
 	if rcpt != "" {
-		f.addHeaderReceipt(rcpt)
+		f.headers.Receipt = []byte(rcpt)
 		f.expectResponse = true
 	}
 	if txn != "" {
-		f.addHeaderTransaction(txn)
+		f.headers.Transaction = []byte(txn)
 	}
 
 	// Custom
@@ -330,15 +276,15 @@ func newCmdAck(msgID, rcpt, txn string) frame {
 	}
 
 	// Must
-	f.addHeaderID(msgID)
+	f.headers.ID = []byte(msgID)
 
 	// Allows
 	if rcpt != "" {
-		f.addHeaderReceipt(rcpt)
+		f.headers.Receipt = []byte(rcpt)
 		f.expectResponse = true
 	}
 	if txn != "" {
-		f.addHeaderTransaction(txn)
+		f.headers.Transaction = []byte(txn)
 	}
 
 	return f
@@ -353,15 +299,15 @@ func newCmdNack(msgID, txn, rcpt string) frame {
 	}
 
 	// Must
-	f.addHeaderID(msgID)
+	f.headers.ID = []byte(msgID)
 
 	// Allows
 	if rcpt != "" {
-		f.addHeaderReceipt(rcpt)
+		f.headers.Receipt = []byte(rcpt)
 		f.expectResponse = true
 	}
 	if txn != "" {
-		f.addHeaderTransaction(txn)
+		f.headers.Transaction = []byte(txn)
 	}
 
 	return f
@@ -377,18 +323,18 @@ func newCmdSubscribe(queueName, subID, rcpt string, am int) (frame, error) {
 	}
 
 	// Must
-	f.addHeaderID(subID)
-	f.addHeaderDestination(queueName)
+	f.headers.ID = []byte(subID)
+	f.headers.Destination = []byte(queueName)
 
 	// Allows
 	a, err := parseAckModeInt(am)
 	if err != nil {
 		return f, err
 	}
-	f.addHeaderAck(a)
+	f.headers.Ack = []byte(a)
 
 	if rcpt != "" {
-		f.addHeaderReceipt(rcpt)
+		f.headers.Receipt = []byte(rcpt)
 		f.expectResponse = true
 	}
 
@@ -404,11 +350,11 @@ func newCmdUnsubscribe(subID, rcpt string) frame {
 	}
 
 	// Must
-	f.addHeaderID(subID)
+	f.headers.ID = []byte(subID)
 
 	// Allows
 	if rcpt != "" {
-		f.addHeaderReceipt(rcpt)
+		f.headers.Receipt = []byte(rcpt)
 		f.expectResponse = true
 	}
 
@@ -424,11 +370,11 @@ func newCmdBegin(txn, rcpt string) frame {
 	}
 
 	// Must
-	f.addHeaderTransaction(txn)
+	f.headers.Transaction = []byte(txn)
 
 	// Allows
 	if rcpt != "" {
-		f.addHeaderReceipt(rcpt)
+		f.headers.Receipt = []byte(rcpt)
 		f.expectResponse = true
 	}
 
@@ -444,11 +390,11 @@ func newCmdAbort(txn, rcpt string) frame {
 	}
 
 	// Must
-	f.addHeaderTransaction(txn)
+	f.headers.Transaction = []byte(txn)
 
 	// Allows
 	if rcpt != "" {
-		f.addHeaderReceipt(rcpt)
+		f.headers.Receipt = []byte(rcpt)
 		f.expectResponse = true
 	}
 
@@ -464,11 +410,11 @@ func newCmdCommit(txn, rcpt string) frame {
 	}
 
 	// Must
-	f.addHeaderTransaction(txn)
+	f.headers.Transaction = []byte(txn)
 
 	// Allows
 	if rcpt != "" {
-		f.addHeaderReceipt(rcpt)
+		f.headers.Receipt = []byte(rcpt)
 		f.expectResponse = true
 	}
 
