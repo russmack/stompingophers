@@ -100,13 +100,27 @@ func (sf *ServerFrame) String() string {
 	return fmt.Sprintf("COMMAND: %s ; HEADERS: %+v ; BODY: %s", sf.Command, sf.Headers, sf.Body)
 }
 
-type headers map[string][]byte
+//type headers map[string][]byte
+
+type headers struct {
+	AcceptVersion []byte
+	Host          []byte
+	ContentLength []byte
+	Receipt       []byte
+	ReceiptID     []byte
+	Destination   []byte
+	ContentType   []byte
+	ID            []byte
+	Ack           []byte
+	Transaction   []byte
+}
 
 type Header struct {
 	Key   string
 	Value string
 }
 
+/*
 func (h headers) add(k string, v []byte) {
 	h[k] = v
 }
@@ -114,41 +128,50 @@ func (h headers) add(k string, v []byte) {
 func (f *frame) addHeader(k, v string) {
 	f.headers.add(k, []byte(v))
 }
-
+*/
 func (f *frame) addHeaderAcceptVersion(s string) {
-	f.addHeader(HeaderAcceptVersion, s)
+	//f.addHeader(HeaderAcceptVersion, s)
+	f.headers.AcceptVersion = []byte(s)
 }
 
 func (f *frame) addHeaderHost(s string) {
-	f.addHeader(HeaderHost, s)
+	//f.addHeader(HeaderHost, s)
+	f.headers.Host = []byte(s)
 }
 
 func (f *frame) addHeaderContentLength() {
-	f.addHeader(HeaderContentLength, strconv.Itoa(len(f.body)+1))
+	//f.addHeader(HeaderContentLength, strconv.Itoa(len(f.body)+1))
+	f.headers.ContentLength = []byte(strconv.Itoa(len(f.body) + 1))
 }
 
 func (f *frame) addHeaderReceipt(s string) {
-	f.addHeader(HeaderReceipt, s)
+	//f.addHeader(HeaderReceipt, s)
+	f.headers.Receipt = []byte(s)
 }
 
 func (f *frame) addHeaderDestination(s string) {
-	f.addHeader(HeaderDestination, s)
+	//f.addHeader(HeaderDestination, s)
+	f.headers.Destination = []byte(s)
 }
 
 func (f *frame) addHeaderContentType(s string) {
-	f.addHeader(HeaderContentType, s)
+	//f.addHeader(HeaderContentType, s)
+	f.headers.ContentType = []byte(s)
 }
 
 func (f *frame) addHeaderID(s string) {
-	f.addHeader(HeaderID, s)
+	//f.addHeader(HeaderID, s)
+	f.headers.ID = []byte(s)
 }
 
 func (f *frame) addHeaderAck(am string) {
-	f.addHeader(HeaderAck, am)
+	//f.addHeader(HeaderAck, am)
+	f.headers.Ack = []byte(am)
 }
 
 func (f *frame) addHeaderTransaction(s string) {
-	f.addHeader(HeaderTransaction, s)
+	//f.addHeader(HeaderTransaction, s)
+	f.headers.Transaction = []byte(s)
 }
 
 // Server frames
@@ -289,9 +312,11 @@ func newCmdSend(queueName string, body []byte, rcpt, txn string, custom ...Heade
 	}
 
 	// Custom
-	for _, j := range custom {
-		f.addHeader(j.Key, j.Value)
-	}
+	/*
+		for _, j := range custom {
+			f.addHeader(j.Key, j.Value)
+		}
+	*/
 
 	return f
 }
@@ -456,13 +481,75 @@ func formatRequest(f frame) []byte {
 	b.WriteString(f.command)
 	b.WriteByte(byteLineFeed)
 
-	for k, v := range f.headers {
-		b.WriteString(k)
+	if f.headers.AcceptVersion != nil {
+		b.WriteString(HeaderAcceptVersion)
 		b.WriteByte(byteColon)
-		b.Write(v)
+		b.Write(f.headers.AcceptVersion)
+		b.WriteByte(byteLineFeed)
+	}
+	if f.headers.Host != nil {
+		b.WriteString(HeaderHost)
+		b.WriteByte(byteColon)
+		b.Write(f.headers.Host)
+		b.WriteByte(byteLineFeed)
+	}
+	if f.headers.ContentLength != nil {
+		b.WriteString(HeaderContentLength)
+		b.WriteByte(byteColon)
+		b.Write(f.headers.ContentLength)
+		b.WriteByte(byteLineFeed)
+	}
+	if f.headers.Receipt != nil {
+		b.WriteString(HeaderReceipt)
+		b.WriteByte(byteColon)
+		b.Write(f.headers.Receipt)
+		b.WriteByte(byteLineFeed)
+	}
+	if f.headers.ReceiptID != nil {
+		b.WriteString(HeaderReceiptID)
+		b.WriteByte(byteColon)
+		b.Write(f.headers.ReceiptID)
+		b.WriteByte(byteLineFeed)
+	}
+	if f.headers.Destination != nil {
+		b.WriteString(HeaderDestination)
+		b.WriteByte(byteColon)
+		b.Write(f.headers.Destination)
+		b.WriteByte(byteLineFeed)
+	}
+	if f.headers.ContentType != nil {
+		b.WriteString(HeaderContentType)
+		b.WriteByte(byteColon)
+		b.Write(f.headers.ContentType)
+		b.WriteByte(byteLineFeed)
+	}
+	if f.headers.ID != nil {
+		b.WriteString(HeaderID)
+		b.WriteByte(byteColon)
+		b.Write(f.headers.ID)
+		b.WriteByte(byteLineFeed)
+	}
+	if f.headers.Ack != nil {
+		b.WriteString(HeaderAck)
+		b.WriteByte(byteColon)
+		b.Write(f.headers.Ack)
+		b.WriteByte(byteLineFeed)
+	}
+	if f.headers.Transaction != nil {
+		b.WriteString(HeaderTransaction)
+		b.WriteByte(byteColon)
+		b.Write(f.headers.Transaction)
 		b.WriteByte(byteLineFeed)
 	}
 
+	/*
+		for k, v := range f.headers {
+			b.WriteString(k)
+			b.WriteByte(byteColon)
+			b.Write(v)
+			b.WriteByte(byteLineFeed)
+		}
+	*/
 	b.WriteByte(byteLineFeed)
 	b.Write(f.body)
 	b.WriteByte(byteLineFeed)
