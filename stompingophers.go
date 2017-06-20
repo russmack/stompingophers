@@ -67,7 +67,6 @@ func parseAckModeInt(n int) (string, error) {
 
 type Client struct {
 	connection    net.Conn
-	Response      []byte
 	Subscriptions []Subscription
 }
 
@@ -100,8 +99,6 @@ func (sf *ServerFrame) String() string {
 	return fmt.Sprintf("COMMAND: %s ; HEADERS: %+v ; BODY: %s", sf.Command, sf.Headers, sf.Body)
 }
 
-//type headers map[string][]byte
-
 type headers struct {
 	AcceptVersion []byte
 	Host          []byte
@@ -113,6 +110,7 @@ type headers struct {
 	ID            []byte
 	Ack           []byte
 	Transaction   []byte
+	UserDefined   map[string][]byte
 }
 
 type Header struct {
@@ -232,7 +230,7 @@ func newCmdDisconnect(rcpt string) frame {
 	return f
 }
 
-func newCmdSend(queueName string, body []byte, rcpt, txn string, custom ...Header) frame {
+func newCmdSend(queueName string, body []byte, rcpt, txn string, userDef ...Header) frame {
 	f := frame{
 		command:        CmdSend,
 		headers:        headers{},
@@ -257,12 +255,10 @@ func newCmdSend(queueName string, body []byte, rcpt, txn string, custom ...Heade
 		f.headers.Transaction = []byte(txn)
 	}
 
-	// Custom
-	/*
-		for _, j := range custom {
-			f.addHeader(j.Key, j.Value)
-		}
-	*/
+	// User-defined.
+	for _, j := range userDef {
+		f.headers.UserDefined[j.Key] = []byte(j.Value)
+	}
 
 	return f
 }
@@ -421,9 +417,7 @@ func newCmdCommit(txn, rcpt string) frame {
 	return f
 }
 
-func formatRequest(f frame) []byte {
-	var b bytes.Buffer
-
+func formatRequest(f frame, b *bytes.Buffer) {
 	b.WriteString(f.command)
 	b.WriteByte(byteLineFeed)
 
@@ -488,26 +482,25 @@ func formatRequest(f frame) []byte {
 		b.WriteByte(byteLineFeed)
 	}
 
-	/*
-		for k, v := range f.headers {
-			b.WriteString(k)
-			b.WriteByte(byteColon)
-			b.Write(v)
-			b.WriteByte(byteLineFeed)
-		}
-	*/
+	for k, v := range f.headers.UserDefined {
+		b.WriteString(k)
+		b.WriteByte(byteColon)
+		b.Write(v)
+		b.WriteByte(byteLineFeed)
+	}
+
 	b.WriteByte(byteLineFeed)
 	b.Write(f.body)
 	b.WriteByte(byteLineFeed)
 
 	b.WriteByte(byteNull)
-
-	return b.Bytes()
 }
 
 func sendRequest(c io.ReadWriter, f frame) ([]byte, error) {
-	req := formatRequest(f)
-	_, err := c.Write(req)
+	var b bytes.Buffer
+
+	formatRequest(f, &b)
+	_, err := c.Write(b.Bytes())
 	if err != nil {
 		return nil, err
 	}
@@ -553,8 +546,6 @@ func (c *Client) Disconnect() error {
 		return fmt.Errorf("failed sending disconnect: %s", err)
 	}
 
-	c.Response = resp
-
 	sf, err := ParseResponse(resp)
 	if err != nil {
 		return errors.New("failed disconnecting, unable to parse response: " + err.Error())
@@ -573,7 +564,7 @@ func (c *Client) Disconnect() error {
 	return c.connection.Close()
 }
 
-func (c *Client) Send(queue string, msg []byte, rcpt, txn string, custom ...Header) ([]byte, error) {
+func (c *Client) Send(queue string, msg []byte, rcpt, txn string, userDef ...Header) ([]byte, error) {
 	// Default ack mode is auto.
 	// Server will not send a response unless either:
 	// a - receipt header is set.
@@ -585,7 +576,7 @@ func (c *Client) Send(queue string, msg []byte, rcpt, txn string, custom ...Head
 			msg,
 			rcpt,
 			txn,
-			custom...))
+			userDef...))
 	if err != nil {
 		// If the server returned an error here then it will also have disconnected.
 		return nil, fmt.Errorf("failed enqueue: %s", err)
@@ -656,7 +647,6 @@ func (c *Client) Unsubscribe(subID, rcpt string) ([]byte, error) {
 }
 
 func (c *Client) Receive() (chan []byte, chan error) {
-	c.Response = nil
 	reader := bufio.NewReader(c.connection)
 
 	recvChan := make(chan []byte)

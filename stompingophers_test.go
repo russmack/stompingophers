@@ -18,9 +18,11 @@ func Benchmark_formatRequest(b *testing.B) {
 		body:           []byte("body"),
 		expectResponse: false}
 
+	var buf bytes.Buffer
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = formatRequest(f)
+		formatRequest(f, &buf)
 	}
 }
 
