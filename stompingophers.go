@@ -67,7 +67,6 @@ func parseAckModeInt(n int) (string, error) {
 
 type Client struct {
 	connection    net.Conn
-	Response      []byte
 	Subscriptions []Subscription
 }
 
@@ -100,55 +99,23 @@ func (sf *ServerFrame) String() string {
 	return fmt.Sprintf("COMMAND: %s ; HEADERS: %+v ; BODY: %s", sf.Command, sf.Headers, sf.Body)
 }
 
-type headers map[string][]byte
+type headers struct {
+	AcceptVersion []byte
+	Host          []byte
+	ContentLength []byte
+	Receipt       []byte
+	ReceiptID     []byte
+	Destination   []byte
+	ContentType   []byte
+	ID            []byte
+	Ack           []byte
+	Transaction   []byte
+	UserDefined   map[string][]byte
+}
 
 type Header struct {
 	Key   string
 	Value string
-}
-
-func (h headers) add(k string, v []byte) {
-	h[k] = v
-}
-
-func (f *frame) addHeader(k, v string) {
-	f.headers.add(k, []byte(v))
-}
-
-func (f *frame) addHeaderAcceptVersion(s string) {
-	f.addHeader(HeaderAcceptVersion, s)
-}
-
-func (f *frame) addHeaderHost(s string) {
-	f.addHeader(HeaderHost, s)
-}
-
-func (f *frame) addHeaderContentLength() {
-	f.addHeader(HeaderContentLength, strconv.Itoa(len(f.body)+1))
-}
-
-func (f *frame) addHeaderReceipt(s string) {
-	f.addHeader(HeaderReceipt, s)
-}
-
-func (f *frame) addHeaderDestination(s string) {
-	f.addHeader(HeaderDestination, s)
-}
-
-func (f *frame) addHeaderContentType(s string) {
-	f.addHeader(HeaderContentType, s)
-}
-
-func (f *frame) addHeaderID(s string) {
-	f.addHeader(HeaderID, s)
-}
-
-func (f *frame) addHeaderAck(am string) {
-	f.addHeader(HeaderAck, am)
-}
-
-func (f *frame) addHeaderTransaction(s string) {
-	f.addHeader(HeaderTransaction, s)
 }
 
 // Server frames
@@ -236,8 +203,8 @@ func newCmdConnect(host string) frame {
 	}
 
 	// Must
-	f.addHeaderAcceptVersion(SupportedVersions)
-	f.addHeaderHost(host)
+	f.headers.AcceptVersion = []byte(SupportedVersions)
+	f.headers.Host = []byte(host)
 
 	// May
 	// login
@@ -256,14 +223,14 @@ func newCmdDisconnect(rcpt string) frame {
 	}
 
 	if rcpt != "" {
-		f.addHeaderReceipt(rcpt)
+		f.headers.Receipt = []byte(rcpt)
 		f.expectResponse = true
 	}
 
 	return f
 }
 
-func newCmdSend(queueName string, body []byte, rcpt, txn string, custom ...Header) frame {
+func newCmdSend(queueName string, body []byte, rcpt, txn string, userDef ...Header) frame {
 	f := frame{
 		command:        CmdSend,
 		headers:        headers{},
@@ -273,24 +240,24 @@ func newCmdSend(queueName string, body []byte, rcpt, txn string, custom ...Heade
 	}
 
 	// Must
-	f.addHeaderDestination(queueName)
+	f.headers.Destination = []byte(queueName)
 
 	// Should
-	f.addHeaderContentType(ContentTypeText)
-	f.addHeaderContentLength()
+	f.headers.ContentType = []byte(ContentTypeText)
+	f.headers.ContentLength = []byte(strconv.Itoa(len(body) + 1))
 
 	// Allows
 	if rcpt != "" {
-		f.addHeaderReceipt(rcpt)
+		f.headers.Receipt = []byte(rcpt)
 		f.expectResponse = true
 	}
 	if txn != "" {
-		f.addHeaderTransaction(txn)
+		f.headers.Transaction = []byte(txn)
 	}
 
-	// Custom
-	for _, j := range custom {
-		f.addHeader(j.Key, j.Value)
+	// User-defined.
+	for _, j := range userDef {
+		f.headers.UserDefined[j.Key] = []byte(j.Value)
 	}
 
 	return f
@@ -305,15 +272,15 @@ func newCmdAck(msgID, rcpt, txn string) frame {
 	}
 
 	// Must
-	f.addHeaderID(msgID)
+	f.headers.ID = []byte(msgID)
 
 	// Allows
 	if rcpt != "" {
-		f.addHeaderReceipt(rcpt)
+		f.headers.Receipt = []byte(rcpt)
 		f.expectResponse = true
 	}
 	if txn != "" {
-		f.addHeaderTransaction(txn)
+		f.headers.Transaction = []byte(txn)
 	}
 
 	return f
@@ -328,15 +295,15 @@ func newCmdNack(msgID, txn, rcpt string) frame {
 	}
 
 	// Must
-	f.addHeaderID(msgID)
+	f.headers.ID = []byte(msgID)
 
 	// Allows
 	if rcpt != "" {
-		f.addHeaderReceipt(rcpt)
+		f.headers.Receipt = []byte(rcpt)
 		f.expectResponse = true
 	}
 	if txn != "" {
-		f.addHeaderTransaction(txn)
+		f.headers.Transaction = []byte(txn)
 	}
 
 	return f
@@ -352,18 +319,18 @@ func newCmdSubscribe(queueName, subID, rcpt string, am int) (frame, error) {
 	}
 
 	// Must
-	f.addHeaderID(subID)
-	f.addHeaderDestination(queueName)
+	f.headers.ID = []byte(subID)
+	f.headers.Destination = []byte(queueName)
 
 	// Allows
 	a, err := parseAckModeInt(am)
 	if err != nil {
 		return f, err
 	}
-	f.addHeaderAck(a)
+	f.headers.Ack = []byte(a)
 
 	if rcpt != "" {
-		f.addHeaderReceipt(rcpt)
+		f.headers.Receipt = []byte(rcpt)
 		f.expectResponse = true
 	}
 
@@ -379,11 +346,11 @@ func newCmdUnsubscribe(subID, rcpt string) frame {
 	}
 
 	// Must
-	f.addHeaderID(subID)
+	f.headers.ID = []byte(subID)
 
 	// Allows
 	if rcpt != "" {
-		f.addHeaderReceipt(rcpt)
+		f.headers.Receipt = []byte(rcpt)
 		f.expectResponse = true
 	}
 
@@ -399,11 +366,11 @@ func newCmdBegin(txn, rcpt string) frame {
 	}
 
 	// Must
-	f.addHeaderTransaction(txn)
+	f.headers.Transaction = []byte(txn)
 
 	// Allows
 	if rcpt != "" {
-		f.addHeaderReceipt(rcpt)
+		f.headers.Receipt = []byte(rcpt)
 		f.expectResponse = true
 	}
 
@@ -419,11 +386,11 @@ func newCmdAbort(txn, rcpt string) frame {
 	}
 
 	// Must
-	f.addHeaderTransaction(txn)
+	f.headers.Transaction = []byte(txn)
 
 	// Allows
 	if rcpt != "" {
-		f.addHeaderReceipt(rcpt)
+		f.headers.Receipt = []byte(rcpt)
 		f.expectResponse = true
 	}
 
@@ -439,24 +406,83 @@ func newCmdCommit(txn, rcpt string) frame {
 	}
 
 	// Must
-	f.addHeaderTransaction(txn)
+	f.headers.Transaction = []byte(txn)
 
 	// Allows
 	if rcpt != "" {
-		f.addHeaderReceipt(rcpt)
+		f.headers.Receipt = []byte(rcpt)
 		f.expectResponse = true
 	}
 
 	return f
 }
 
-func formatRequest(f frame) []byte {
-	var b bytes.Buffer
-
+func formatRequest(f frame, b *bytes.Buffer) {
 	b.WriteString(f.command)
 	b.WriteByte(byteLineFeed)
 
-	for k, v := range f.headers {
+	if f.headers.AcceptVersion != nil {
+		b.WriteString(HeaderAcceptVersion)
+		b.WriteByte(byteColon)
+		b.Write(f.headers.AcceptVersion)
+		b.WriteByte(byteLineFeed)
+	}
+	if f.headers.Host != nil {
+		b.WriteString(HeaderHost)
+		b.WriteByte(byteColon)
+		b.Write(f.headers.Host)
+		b.WriteByte(byteLineFeed)
+	}
+	if f.headers.ContentLength != nil {
+		b.WriteString(HeaderContentLength)
+		b.WriteByte(byteColon)
+		b.Write(f.headers.ContentLength)
+		b.WriteByte(byteLineFeed)
+	}
+	if f.headers.Receipt != nil {
+		b.WriteString(HeaderReceipt)
+		b.WriteByte(byteColon)
+		b.Write(f.headers.Receipt)
+		b.WriteByte(byteLineFeed)
+	}
+	if f.headers.ReceiptID != nil {
+		b.WriteString(HeaderReceiptID)
+		b.WriteByte(byteColon)
+		b.Write(f.headers.ReceiptID)
+		b.WriteByte(byteLineFeed)
+	}
+	if f.headers.Destination != nil {
+		b.WriteString(HeaderDestination)
+		b.WriteByte(byteColon)
+		b.Write(f.headers.Destination)
+		b.WriteByte(byteLineFeed)
+	}
+	if f.headers.ContentType != nil {
+		b.WriteString(HeaderContentType)
+		b.WriteByte(byteColon)
+		b.Write(f.headers.ContentType)
+		b.WriteByte(byteLineFeed)
+	}
+	if f.headers.ID != nil {
+		b.WriteString(HeaderID)
+		b.WriteByte(byteColon)
+		b.Write(f.headers.ID)
+		b.WriteByte(byteLineFeed)
+	}
+	if f.headers.Ack != nil {
+		b.WriteString(HeaderAck)
+		b.WriteByte(byteColon)
+		b.Write(f.headers.Ack)
+		b.WriteByte(byteLineFeed)
+	}
+	if f.headers.Transaction != nil {
+		b.WriteString(HeaderTransaction)
+		b.WriteByte(byteColon)
+		b.Write(f.headers.Transaction)
+		b.WriteByte(byteLineFeed)
+	}
+
+	for k, v := range f.headers.UserDefined {
 		b.WriteString(k)
 		b.WriteByte(byteColon)
 		b.Write(v)
@@ -468,13 +494,13 @@ func formatRequest(f frame) []byte {
 	b.WriteByte(byteLineFeed)
 
 	b.WriteByte(byteNull)
-
-	return b.Bytes()
 }
 
 func sendRequest(c io.ReadWriter, f frame) ([]byte, error) {
-	req := formatRequest(f)
-	_, err := c.Write(req)
+	var b bytes.Buffer
+
+	formatRequest(f, &b)
+	_, err := c.Write(b.Bytes())
 	if err != nil {
 		return nil, err
 	}
@@ -520,8 +546,6 @@ func (c *Client) Disconnect() error {
 		return fmt.Errorf("failed sending disconnect: %s", err)
 	}
 
-	c.Response = resp
-
 	sf, err := ParseResponse(resp)
 	if err != nil {
 		return errors.New("failed disconnecting, unable to parse response: " + err.Error())
@@ -540,7 +564,7 @@ func (c *Client) Disconnect() error {
 	return c.connection.Close()
 }
 
-func (c *Client) Send(queue string, msg []byte, rcpt, txn string, custom ...Header) ([]byte, error) {
+func (c *Client) Send(queue string, msg []byte, rcpt, txn string, userDef ...Header) ([]byte, error) {
 	// Default ack mode is auto.
 	// Server will not send a response unless either:
 	// a - receipt header is set.
@@ -552,7 +576,7 @@ func (c *Client) Send(queue string, msg []byte, rcpt, txn string, custom ...Head
 			msg,
 			rcpt,
 			txn,
-			custom...))
+			userDef...))
 	if err != nil {
 		// If the server returned an error here then it will also have disconnected.
 		return nil, fmt.Errorf("failed enqueue: %s", err)
@@ -623,7 +647,6 @@ func (c *Client) Unsubscribe(subID, rcpt string) ([]byte, error) {
 }
 
 func (c *Client) Receive() (chan []byte, chan error) {
-	c.Response = nil
 	reader := bufio.NewReader(c.connection)
 
 	recvChan := make(chan []byte)
