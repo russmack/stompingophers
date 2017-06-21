@@ -7,6 +7,12 @@ import (
 	stomper "github.com/russmack/stompingophers"
 )
 
+const (
+	queueIP   = "127.0.0.1"
+	queuePort = 61613
+	queueName = "/queue/nooq"
+)
+
 var (
 	printer chan stomper.ServerFrame
 	client  stomper.Client
@@ -27,16 +33,20 @@ func main() {
 }
 
 func connect() *stomper.Client {
-	queueIP := "127.0.0.1"
-	queuePort := 61613
-
 	var err error
 	conn, err := stomper.NewConnection(queueIP, queuePort)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	client, resp, err := stomper.Connect(conn)
+	options := stomper.Options{
+		HeartBeat: &stomper.HeartBeat{
+			SendInterval: 4000,
+			RecvTimeout:  4000,
+		},
+	}
+
+	client, resp, err := stomper.Connect(conn, &options)
 	if err != nil {
 		log.Fatal("failed connecting: " + err.Error())
 	}
@@ -53,7 +63,7 @@ func connect() *stomper.Client {
 func subscribe(client *stomper.Client) stomper.Subscription {
 	fmt.Println("Subscribing to queue...\n")
 
-	sub, resp, err := client.Subscribe("/queue/nooq", "mysubrcpt", stomper.AckModeAuto)
+	sub, resp, err := client.Subscribe(queueName, "mysubrcpt", stomper.AckModeAuto)
 	if err != nil {
 		log.Fatal("failed sending: " + err.Error())
 	}

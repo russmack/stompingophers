@@ -11,6 +11,12 @@ import (
 	stomper "github.com/russmack/stompingophers"
 )
 
+const (
+	queueIP   = "127.0.0.1"
+	queuePort = 61613
+	queueName = "/queue/nooq"
+)
+
 func main() {
 	//defer profile.Start(profile.MemProfile, profile.ProfilePath(".")).Stop()
 	//defer profile.Start(profile.CPUProfile, profile.ProfilePath(".")).Stop()
@@ -19,15 +25,19 @@ func main() {
 }
 
 func producer() {
-	queueIP := "127.0.0.1"
-	queuePort := 61613
-
 	conn, err := stomper.NewConnection(queueIP, queuePort)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	client, resp, err := stomper.Connect(conn)
+	options := stomper.Options{
+		HeartBeat: &stomper.HeartBeat{
+			SendInterval: 5000,
+			RecvTimeout:  5000,
+		},
+	}
+
+	client, resp, err := stomper.Connect(conn, &options)
 	if err != nil {
 		log.Fatal("failed connecting: " + err.Error())
 	}
@@ -36,10 +46,10 @@ func producer() {
 
 	fmt.Println("Sending messages...")
 
-	gen := gen2 //gen1
+	gen := gen1 //gen2
 
 	for j := range gen() {
-		_, err = client.Send("/queue/nooq", j, "", "")
+		_, err = client.Send(queueName, j, "", "")
 		if err != nil {
 			log.Fatal("failed sending: " + err.Error())
 		}
@@ -53,12 +63,12 @@ func producer() {
 //
 
 // gen1 generates small messages.
-func gen1() chan string {
-	c := make(chan string)
+func gen1() chan []byte {
+	c := make(chan []byte)
 
 	go func() {
 		for i := 0; i < 45000; i++ {
-			c <- "Well, hello, number " + strconv.Itoa(i) + "!"
+			c <- []byte("Well, hello, number " + strconv.Itoa(i) + "!")
 		}
 		close(c)
 	}()
