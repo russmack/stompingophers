@@ -22,7 +22,7 @@ func Benchmark_formatRequest(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		formatRequest(f, &buf)
+		formatRequest(&f, &buf)
 	}
 }
 
@@ -150,9 +150,16 @@ version:1.2
 		}
 	}()
 
+	options := Options{
+		HeartBeat: &HeartBeat{
+			SendInterval: 5000,
+			RecvTimeout:  5000,
+		},
+	}
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _, _ = Connect(cliconn)
+		_, _, _ = Connect(cliconn, &options)
 	}
 
 	cliconn.Close()
@@ -164,9 +171,16 @@ func Benchmark_newCmdConnect(b *testing.B) {
 
 	h := "127.0.0.1"
 
+	options := Options{
+		HeartBeat: &HeartBeat{
+			SendInterval: 5000,
+			RecvTimeout:  5000,
+		},
+	}
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = newCmdConnect(h)
+		_ = newCmdConnect(h, &options)
 	}
 }
 
@@ -181,8 +195,15 @@ version:1.2
 
 ` + "\000"
 
+	options := Options{
+		HeartBeat: &HeartBeat{
+			SendInterval: 5000,
+			RecvTimeout:  5000,
+		},
+	}
+
 	h := "127.0.0.1"
-	f := newCmdConnect(h)
+	f := newCmdConnect(h, &options)
 
 	cliconn, srvconn := net.Pipe()
 
@@ -234,7 +255,14 @@ receipt-id:mysubrcpt
 		}
 	}()
 
-	client, _, err := Connect(cliconn)
+	options := Options{
+		HeartBeat: &HeartBeat{
+			SendInterval: 5000,
+			RecvTimeout:  5000,
+		},
+	}
+
+	client, _, err := Connect(cliconn, &options)
 	if err != nil {
 		b.Error(err)
 	}
