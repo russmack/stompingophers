@@ -5,7 +5,7 @@ A Go implementation of the stomp messaging protocol.
 [![Build Status](https://travis-ci.org/russmack/stompingophers.svg?branch=master)](https://travis-ci.org/russmack/stompingophers)
 
 ---
-#### Status: working, needs tidying.
+#### Status: OK.
 ---
 
 ## Usage
@@ -25,8 +25,8 @@ See examples/ producer and consumer.
 - [X] MESSAGE
 - [X] ERROR 
 
-- [ ] Heartbeat
-- [ ] Transactions
+- [X] Heartbeat
+- [X] Transactions
 
 
 ## License
